@@ -51,11 +51,6 @@ All data is stored locally in your browser, ensuring 100% privacy and user contr
 
 ## 🚀 Getting Started
 
-### Running in the Google AI Studio Environment (Recommended)
-
-This project is designed to run seamlessly within the Google AI Studio build platform.
-
-https://ai.studio/apps/drive/1KQ2IXRUfcgXfwmDygMZjhKhujOVzp1xp
 
 ### Running Locally (For development outside Google AI Studio)
 

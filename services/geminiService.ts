@@ -1,3 +1,4 @@
+
 // Kinetix AI Service: Manages all interactions with the Google Gemini API.
 import { GoogleGenAI, Type } from "@google/genai";
 import { WorkoutPlan, WorkoutSession, Exercise, DayWorkout, WarmUpExercise } from "../types";
@@ -499,14 +500,17 @@ export const getWorkoutSummary = async (history: WorkoutSession[], plan: Workout
     const plannedWorkout = plan?.find(p => p.day === lastSession.day);
 
     let prompt = `
-        You are Kinetix, a hyper-observant and honest AI fitness coach. Analyze the user's most recent workout session provided below in JSON format. Provide a specific, insightful, and truthful 1-2 sentence summary.
-        
-        Your analysis MUST follow these steps:
-        1.  **Compare to the Plan:** First, look at the 'plannedWorkout' and compare it to the 'completedSession'. Did the user complete all the planned exercises?
-        2.  **Acknowledge Incompleteness (If Applicable):** If the number of exercises in 'completedSession' is less than in 'plannedWorkout', you MUST start your summary by acknowledging this fact in a supportive tone.
-        3.  **Find a Specific Achievement:** After the initial acknowledgement (if any), find a specific, positive data point from the exercises that WERE completed. Mention an exercise by name. Did they lift heavier? Do more reps? Did their 'effort' rating show they were pushing themselves?
-        4.  **Combine and Synthesize:** Combine your observations into a concise, encouraging summary. Do not use markdown.
+        You are Kinetix, a hyper-observant and honest AI fitness coach. Analyze the user's most recent workout session ('completedSession') and compare it to what was originally scheduled ('plannedWorkout'). Provide a specific, insightful, and truthful 1-2 sentence summary. Do not use markdown.
 
+        Your analysis MUST follow these logic steps:
+        1.  **Check for Swaps:** Compare the exercise names in 'completedSession' to 'plannedWorkout'. Did the user perform an exercise that wasn't on the original plan? This indicates they swapped an exercise.
+        2.  **Check for Incompleteness:** Is the number of exercises in 'completedSession' less than in 'plannedWorkout'?
+        3.  **Synthesize the Summary (Prioritize your response):**
+            *   **If a swap occurred:** Start your summary by acknowledging the swap in a positive way. Then, find a specific achievement from one of the completed exercises (it could be the swapped one or another).
+            *   **If no swap, but incomplete:** Start your summary by acknowledging the shorter session in a supportive tone. Then, find a specific achievement from an exercise that WAS completed.
+            *   **If the workout was completed as planned:** Go straight to finding a specific, positive data point or achievement. Mention an exercise by name. Focus on things like increased weight, more reps, or a 'Hard' effort rating indicating they pushed themselves.
+
+        **Example for Swapped Workout:** "Nice, I see you swapped in Dumbbell Flyes and hit a new rep PR on them!"
         **Example for Incomplete Workout:** "Looks like you had to cut the session short, but you still showed great strength on the Bench Press you completed!"
         **Example for Complete Workout:** "Great session! I noticed you pushed hard on the Bench Press and managed to add 5 lbs. That's excellent progress."
 

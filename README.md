@@ -51,7 +51,6 @@ All data is stored locally in your browser, ensuring 100% privacy and user contr
 
 ## 🚀 Getting Started
 
-
 ### Running Locally (For development outside Google AI Studio)
 
 If you have forked this repository and wish to run it on your local machine, you will need to set up a local development environment, as the project does not include one by default.
@@ -123,8 +122,7 @@ Contributions are what make the open-source community such an amazing place to l
 
 ## 📜 License
 
-Distributed under the MIT License. 
-
+Distributed under the MIT License.
 ## 🙏 Acknowledgments
 
 - Created by **Alverto Ortega**

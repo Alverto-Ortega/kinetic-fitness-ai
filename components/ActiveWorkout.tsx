@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { DayWorkout, WorkoutSession, PerformedExercise, PerformedSet, Exercise, Preferences } from '../types.ts';
 import { useTimer } from '../hooks/useTimer.ts';
@@ -73,16 +71,18 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
 
   // --- EFFECTS ---
 
-  // Initialize or re-initialize the session data structure whenever the workout plan changes (e.g., on load or exercise swap).
+  // Initialize the session data structure when the component mounts with the initial workout.
+  // This now depends on the initial `workout` prop, not the mutable `activeDayWorkout` state,
+  // to prevent data loss when an exercise is swapped locally.
   useEffect(() => {
     setSessionData(
-      activeDayWorkout.exercises.map(ex => ({
+      workout.exercises.map(ex => ({
         exerciseName: ex.name,
         sets: Array.from({ length: parseInt(ex.sets, 10) }, () => ({ reps: '', weight: '' })),
         effort: undefined,
       }))
     );
-  }, [activeDayWorkout]);
+  }, [workout]);
   
   // Reset state when moving to a new exercise.
   useEffect(() => {
@@ -103,14 +103,37 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
         const exerciseData = { ...updated[currentExerciseIndex] };
         const setData = { ...exerciseData.sets[setIndex] };
         
-        const numericValue = value.replace(/[^0-9.]/g, '');
+        let sanitizedValue = '';
+        if (field === 'reps') {
+            // For reps, allow only whole numbers. No decimals.
+            sanitizedValue = value.replace(/[^0-9]/g, '');
+        } else { // field === 'weight'
+            // For weight, allow numbers and a single decimal point.
+            // First, remove any non-digit/non-period characters.
+            let cleanedValue = value.replace(/[^0-9.]/g, '');
+
+            // Automatically prepend '0' if the user starts with a period.
+            if (cleanedValue.startsWith('.')) {
+                cleanedValue = '0' + cleanedValue;
+            }
+
+            // Then, ensure there's at most one period.
+            const parts = cleanedValue.split('.');
+            if (parts.length > 2) {
+                // If there are multiple periods, reconstruct with only the first one.
+                // e.g., "1.2.3" becomes "1.23"
+                sanitizedValue = `${parts[0]}.${parts.slice(1).join('')}`;
+            } else {
+                sanitizedValue = cleanedValue;
+            }
+        }
 
         if (field === 'weight') {
-             setData.weight = numericValue;
+             setData.weight = sanitizedValue;
              // Store the weight locally for the 'Use last' button.
-             setLastWeight(lw => ({...lw, [currentExercise.name]: numericValue}));
+             setLastWeight(lw => ({...lw, [currentExercise.name]: sanitizedValue}));
         } else {
-             setData.reps = numericValue;
+             setData.reps = sanitizedValue;
         }
 
         exerciseData.sets[setIndex] = setData;
@@ -170,11 +193,22 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
     // 1. Update the master plan in App.tsx.
     onExerciseSwap(activeDayWorkout.day, originalExerciseName, newExercise);
 
-    // 2. Update the local workout state for this session.
+    // 2. Update the local workout state for this session to update the UI.
     setActiveDayWorkout(currentWorkout => {
         const newExercises = [...currentWorkout.exercises];
         newExercises[currentExerciseIndex] = newExercise;
         return { ...currentWorkout, exercises: newExercises };
+    });
+
+    // 3. Manually update sessionData for the swapped exercise, preserving data for other exercises.
+    setSessionData(prev => {
+        const updated = [...prev];
+        updated[currentExerciseIndex] = {
+            exerciseName: newExercise.name,
+            sets: Array.from({ length: parseInt(newExercise.sets, 10) }, () => ({ reps: '', weight: '' })),
+            effort: undefined,
+        };
+        return updated;
     });
 
     setIsAlternativesModalOpen(false);
@@ -205,17 +239,19 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
       date: new Date().toISOString(),
       day: activeDayWorkout.day,
       exercises: sessionData
-        .map((ex, index) => ({
+        .map(ex => ({
           ...ex,
-          exerciseName: activeDayWorkout.exercises[index].name, // Ensure latest name is used after a swap.
           sets: ex.sets
-            .filter(s => s.reps && String(s.reps).trim() !== '') // Ensure set was actually performed.
-            .map(s => ({
-              reps: parseInt(String(s.reps), 10),
-              weight: s.weight && String(s.weight).trim() !== '' ? parseFloat(String(s.weight)) : undefined
-            }))
+            .filter(s => s.reps && String(s.reps).trim() !== '')
+            .map(s => {
+              const weightValue = s.weight ? parseFloat(String(s.weight)) : undefined;
+              return {
+                reps: parseInt(String(s.reps), 10),
+                weight: (weightValue === undefined || isNaN(weightValue)) ? undefined : weightValue
+              };
+            })
         }))
-        .filter(ex => ex.sets.length > 0) // Only include exercises with completed sets.
+        .filter(ex => ex.sets.length > 0)
     };
     onWorkoutComplete(finalSession);
   };

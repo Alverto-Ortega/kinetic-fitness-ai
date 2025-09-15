@@ -1,0 +1,5 @@
+{
+  "name": "Kinetix Fitness AI",
+  "description": "An elegant, AI-powered fitness tracker that generates personalized weekly workout routines. It tracks your progress, adjusts exercises based on performance, and includes a rest timer to guide you through each session, ensuring you consistently advance on your fitness journey.",
+  "requestFramePermissions": []
+}

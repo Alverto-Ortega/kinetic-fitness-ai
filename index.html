@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%23818CF8' stroke-width='12' stroke-linecap='round' stroke-linejoin='round'%3e%3cpath d='M25 10 V 90' /%3e%3cpath d='M75 10 L 40 50 L 75 90' /%3e%3c/svg%3e" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Kinetix Fitness AI</title>
+    
+    <!-- Open Graph Meta Tags for Social Sharing -->
+    <meta property="og:title" content="Kinetix Fitness AI" />
+    <meta property="og:description" content="An elegant, AI-powered fitness tracker that generates personalized weekly workout routines, tracks your progress, and adjusts exercises based on performance." />
+    <meta property="og:image" content="data:image/svg+xml,%3csvg width='1200' height='630' viewBox='0 0 1200 630' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='1200' height='630' fill='%230f172a'/%3e%3cpath d='M490 200 V 430 M 590 200 L 525 315 L 590 430' stroke='%23818CF8' stroke-width='30' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3e%3ctext x='630' y='340' font-family='sans-serif' font-size='70' font-weight='bold' fill='white'%3eKinetix%3c/text%3e%3c/svg%3e" />
+    <meta property="og:type" content="website" />
+
+    <style>
+      /* Basic CSS Reset for cross-browser consistency */
+      html { box-sizing: border-box; }
+      *, *:before, *:after { box-sizing: inherit; }
+      body, h1, h2, h3, p, ol, ul { margin: 0; padding: 0; font-weight: normal; }
+      body { font-family: sans-serif; }
+    </style>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class', // Enable class-based dark mode
+        theme: {
+          extend: {
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              fadeOut: {
+                'from': { opacity: '1' },
+                'to': { opacity: '0' },
+              },
+              pulse: {
+                '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+                '50%': { transform: 'scale(1.05)', opacity: '.8' },
+              },
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.5s ease-in-out',
+              'fade-out': 'fadeOut 1s ease-in-out',
+              'pulse': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            },
+          },
+        },
+      };
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.19.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

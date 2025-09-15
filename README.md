@@ -123,7 +123,7 @@ Contributions are what make the open-source community such an amazing place to l
 
 ## 📜 License
 
-Distributed under the MIT License. You would need to add a `LICENSE` file to your repository for this to be official.
+Distributed under the MIT License. 
 
 ## 🙏 Acknowledgments
 

@@ -4,7 +4,7 @@ import { PlanDashboard } from './components/PlanDashboard';
 import { ActiveWorkout } from './components/ActiveWorkout';
 import { BodyAnalysisModal } from './components/BodyAnalysisModal';
 import { InitialAnalysisPromptModal } from './components/InitialAnalysisPromptModal';
-import { WorkoutPlan, WorkoutSession, DayWorkout, Exercise, BodyAnalysis, Preferences } from './types';
+import { WorkoutPlan, WorkoutSession, DayWorkout, Exercise, BodyAnalysis, Preferences, ActiveSessionData } from './types';
 import { useStickyState } from './hooks/useStickyState';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { Documentation } from './components/Documentation';
@@ -63,24 +63,24 @@ function App() {
   /** The current theme ('light' or 'dark'). */
   const [theme, setTheme] = useStickyState<'light' | 'dark'>('dark', 'kinetix-theme');
   
-  // --- LOCAL UI STATE ---
+  // --- LOCAL UI STATE & PERSISTED ACTIVE WORKOUT STATE ---
   /** Holds the workout object for the currently active session. Null if no workout is active. */
   const [activeWorkout, setActiveWorkout] = useStickyState<DayWorkout | null>(null, 'kinetix-active-workout');
-  /** Toggles the visibility of the documentation and FAQ modals. */
+  /** The index of the current exercise in the active workout. */
+  const [activeExerciseIndex, setActiveExerciseIndex] = useStickyState<number>(0, 'kinetix-active-exercise-index');
+  /** Holds the performance data for the in-progress workout session. */
+  const [activeSessionData, setActiveSessionData] = useStickyState<ActiveSessionData | null>(null, 'kinetix-active-session-data');
+  /** The timestamp when the current workout was started, used for duration tracking. */
+  const [workoutStartTime, setWorkoutStartTime] = useStickyState<number | null>(null, 'kinetix-workout-start-time');
+
   const [viewingDocs, setViewingDocs] = useState(false);
   const [viewingFAQ, setViewingFAQ] = useState(false);
-  /** Toggles the full-screen loader during automatic plan generation. */
   const [isAutoGenerating, setIsAutoGenerating] = useState(false);
-  /** Toggles the visibility of the AI's suggestion to add a workout day. */
   const [showScheduleSuggestion, setShowScheduleSuggestion] = useState(false);
-  /** Toggles the visibility of the "before" picture analysis prompt. */
   const [showInitialAnalysisPrompt, setShowInitialAnalysisPrompt] = useState(false);
-  /** Toggles the visibility of the main body analysis modal. */
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
-  /** Toggles the visibility of the clear data confirmation modal. */
   const [isClearDataModalOpen, setIsClearDataModalOpen] = useState(false);
 
-  
   const isOnline = useOnlineStatus();
 
   // --- EFFECTS ---
@@ -160,8 +160,19 @@ function App() {
     setHasSeenInitialPrompt(true); // Assume imported data means they are past the initial prompt phase.
   };
   
+  /** Initializes and persists the state for a new workout session. */
   const handleStartWorkout = (workout: DayWorkout) => {
     setActiveWorkout(workout);
+    setActiveExerciseIndex(0);
+    // Initialize the data structure for logging sets and reps.
+    setActiveSessionData(
+      workout.exercises.map(ex => ({
+        exerciseName: ex.name,
+        sets: Array.from({ length: parseInt(ex.sets, 10) }, () => ({ reps: '', weight: '' })),
+        effort: undefined,
+      }))
+    );
+    setWorkoutStartTime(Date.now());
   };
   
   /** Updates the user's workout streak based on the date of the completed session. */
@@ -243,16 +254,28 @@ function App() {
           setIsAutoGenerating(false);
       }
   };
+  
+  /** Clears all state related to an active workout session. */
+  const clearActiveWorkoutState = () => {
+    setActiveWorkout(null);
+    setActiveExerciseIndex(0);
+    setActiveSessionData(null);
+    setWorkoutStartTime(null);
+  };
 
   /**
    * Main callback for when a workout session is finished.
    * It updates history, streak, and completion status, then triggers the next plan generation if needed.
    */
-  const handleWorkoutComplete = async (session: WorkoutSession) => {
-    const updatedHistory = [...workoutHistory, session];
+  const handleWorkoutComplete = async (session: Omit<WorkoutSession, 'duration'>) => {
+    const endTime = Date.now();
+    const duration = workoutStartTime ? Math.round((endTime - workoutStartTime) / 1000) : undefined;
+    const completeSession: WorkoutSession = { ...session, duration };
+
+    const updatedHistory = [...workoutHistory, completeSession];
     setWorkoutHistory(updatedHistory);
     updateStreak(session.date);
-    setActiveWorkout(null);
+    clearActiveWorkoutState();
 
     const updatedCompletedDays = Array.from(new Set([...completedDays, session.day]));
     setCompletedDays(updatedCompletedDays);
@@ -295,7 +318,7 @@ function App() {
   };
 
   const handleCancelWorkout = () => {
-    setActiveWorkout(null);
+    clearActiveWorkoutState();
   };
 
   /** Resets the app to the initial planner state, keeping history. */
@@ -322,6 +345,9 @@ function App() {
       'kinetix-theme',
       'kinetix-info-seen',
       'kinetix-active-workout',
+      'kinetix-active-exercise-index',
+      'kinetix-active-session-data',
+      'kinetix-workout-start-time',
     ];
 
     // Clear all items from localStorage.
@@ -346,7 +372,7 @@ function App() {
     setPlanGenerationQueued(false);
     setHasSeenInitialPrompt(false);
     setTheme('dark'); // Reset to default theme
-    setActiveWorkout(null);
+    clearActiveWorkoutState();
 
     // Finally, reload the page to ensure the application starts fresh from its initial state.
     window.location.reload();
@@ -399,13 +425,17 @@ function App() {
     return <AutoGenerationLoader />;
   }
 
-  if (activeWorkout) {
+  if (activeWorkout && activeSessionData) {
     return <ActiveWorkout 
               workout={activeWorkout} 
-              onWorkoutComplete={handleWorkoutComplete} 
-              onCancel={handleCancelWorkout} 
               history={workoutHistory}
               preferences={preferences}
+              exerciseIndex={activeExerciseIndex}
+              sessionData={activeSessionData}
+              setSessionData={setActiveSessionData}
+              setExerciseIndex={setActiveExerciseIndex}
+              onWorkoutComplete={handleWorkoutComplete} 
+              onCancel={handleCancelWorkout} 
               onExerciseSwap={handleUpdateExerciseInPlan}
             />;
   }

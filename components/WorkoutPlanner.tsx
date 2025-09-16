@@ -15,7 +15,7 @@ interface WorkoutPlannerProps {
   isOnline: boolean;
 }
 
-const equipmentOptions = ["Bodyweight", "Dumbbells", "Barbell", "Kettlebells", "Resistance Bands", "Pull-up Bar", "Treadmill", "Stationary Bike", "Elliptical Machine", "Boxing Heavy Bag", "Weight Machine"];
+const equipmentOptions = ["Bodyweight", "Dumbbells", "Barbell", "Kettlebells", "Resistance Bands", "Pull-up Bar", "Squat Rack", "Treadmill", "Stationary Bike", "Elliptical Machine", "Boxing Heavy Bag", "Weight Machine"];
 const goalOptions = ["Muscle Growth", "Strength", "Endurance", "Fat Loss (HIIT)", "Full Body", "Active Recovery", "Yoga"];
 const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 

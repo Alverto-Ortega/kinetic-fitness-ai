@@ -72,7 +72,6 @@ const audioBufferToWav = (buffer: AudioBuffer): Blob => {
 const createBeep = async (): Promise<HTMLAudioElement | null> => {
     // Check for browser compatibility, including vendor prefixes.
     if (typeof window === 'undefined') return null;
-    // FIX: Cast window to `any` to allow access to vendor-prefixed `webkitOfflineAudioContext`.
     const OfflineAudioContext = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
     if (!OfflineAudioContext) {
         console.warn("Web Audio API's OfflineAudioContext is not supported in this browser.");
@@ -80,7 +79,7 @@ const createBeep = async (): Promise<HTMLAudioElement | null> => {
     }
 
     try {
-        const duration = 0.2; // A short, 200ms beep.
+        const duration = 0.5;
         const sampleRate = 44100;
         const offlineContext = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
         const oscillator = offlineContext.createOscillator();
@@ -89,13 +88,15 @@ const createBeep = async (): Promise<HTMLAudioElement | null> => {
         oscillator.connect(gainNode);
         gainNode.connect(offlineContext.destination);
 
-        // Set beep parameters for a subtle but noticeable notification sound.
-        gainNode.gain.value = 0.3; // A modest volume.
-        oscillator.frequency.value = 880; // A higher pitch (A5 note) is easier to hear.
+        // Set beep parameters for a more pleasant, noticeable sound.
+        const now = offlineContext.currentTime;
+        gainNode.gain.setValueAtTime(0.6, now); // Slightly louder
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        oscillator.frequency.value = 660; // E5, a bit less piercing than A5 (880Hz)
         oscillator.type = 'sine'; // A clean, pure tone.
 
-        oscillator.start(0);
-        oscillator.stop(duration);
+        oscillator.start(now);
+        oscillator.stop(now + duration);
 
         const renderedBuffer = await offlineContext.startRendering();
         const wavBlob = audioBufferToWav(renderedBuffer);
@@ -140,9 +141,10 @@ function useInterval(callback: () => void, delay: number | null) {
  * A robust timer hook that remains accurate even if the browser tab is backgrounded.
  * It uses timestamps (Date.now()) for calculation instead of relying solely on setInterval.
  * @param initialTime The initial time for the timer in seconds.
+ * @param onComplete Optional callback to execute when the timer finishes.
  * @returns An object with timer state and control functions.
  */
-export const useTimer = (initialTime: number) => {
+export const useTimer = (initialTime: number, onComplete?: () => void) => {
   const [time, setTime] = useState(initialTime);
   const [isActive, setIsActive] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -187,6 +189,7 @@ export const useTimer = (initialTime: number) => {
       endTimeRef.current = null;
       // Play a sound when the timer finishes.
       audioRef.current?.play().catch(e => console.error("Audio play failed:", e));
+      onComplete?.();
     }
   }, isActive ? 1000 : null); // Interval runs every second only when active.
 

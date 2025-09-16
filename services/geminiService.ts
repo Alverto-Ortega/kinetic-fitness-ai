@@ -1,4 +1,3 @@
-
 // Kinetix AI Service: Manages all interactions with the Google Gemini API.
 import { GoogleGenAI, Type } from "@google/genai";
 import { WorkoutPlan, WorkoutSession, Exercise, DayWorkout, WarmUpExercise } from "../types";
@@ -15,10 +14,10 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 const exerciseSchema = {
     type: Type.OBJECT,
     properties: {
-        name: { type: Type.STRING, description: "Name of the exercise." },
+        name: { type: Type.STRING, description: "Name of the exercise. For advanced techniques like supersets, format the name as 'Superset: [Exercise 1] / [Exercise 2]'." },
         sets: { type: Type.STRING, description: "Number of sets, as a string (e.g., '3', '4')." },
         reps: { type: Type.STRING, description: "Target repetition range, as a string (e.g., '8-12', '5'). For Yoga, this should describe the hold duration (e.g., 'Hold for 5 breaths')." },
-        rest: { type: Type.INTEGER, description: "Rest time in seconds between sets." },
+        rest: { type: Type.INTEGER, description: "Rest time in seconds between sets. For a superset, this should be 0." },
         suggestedWeight: { type: Type.STRING, description: "CRITICAL: The suggested starting weight. This value MUST be one of two formats ONLY: 1. A specific weight in lbs (e.g., '135 lbs'). 2. The single, exact string 'Bodyweight'. You are FORBIDDEN from combining these (e.g., 'Bodyweight + 25 lbs'). For exercises like Barbell Squats or Dumbbell Curls, provide only the weight value. For exercises like Weighted Pull-ups, provide only the *additional* weight to be used (e.g., '25 lbs')." },
     },
     required: ["name", "sets", "reps", "rest", "suggestedWeight"],
@@ -150,19 +149,32 @@ const buildPrompt = (preferences: any, history?: any[]) => {
     
   prompt += `
     1.  **Goal Assignment:** Based on the user's preferences and any specified desired or excluded goals, you must assign an optimal goal for each workout day (e.g., 'Strength', 'Hypertrophy', 'Endurance'). Structure the goals to create a logical and scientifically-backed weekly split that promotes balance and recovery (e.g., Upper/Lower, Push/Pull/Legs).
-    2.  **Creative Exercise Selection:** Make full and varied use of ALL the user's available equipment. Avoid repetitive plans by introducing different exercises and variations that target the same muscle groups.
+    2.  **Creative & Advanced Exercise Selection:** Make full and varied use of ALL the user's available equipment. Avoid repetitive, generic plans. Introduce different exercises and variations that target the same muscle groups. For 'Intermediate' and 'Advanced' users, be more experimental: suggest advanced exercise variations and occasionally introduce techniques like supersets, drop sets, or pause reps. For a superset, format the exercise name as 'Superset: [Exercise 1] / [Exercise 2]', list it as one exercise item, and set its rest time to 0.
     3.  **Balanced Structure:** The overall weekly plan must be balanced, targeting all major muscle groups. Structure individual workouts logically, often starting with major compound lifts and moving to accessory/isolation work.
     4.  **Yoga Goal:** If a day's goal is 'Yoga', create a sequence of yoga poses. For each pose, structure the exercise object as follows: 'sets' should be '1', 'reps' should describe the hold duration (e.g., 'Hold for 5 breaths', '30-60 second hold'), 'rest' should be a short transition time (e.g., 10-15 seconds), and 'suggestedWeight' must be 'Bodyweight'. Target body parts should be something like 'Flexibility, Balance'.
   `;
 
   // Add workout history to the prompt for progressive overload.
   if (history && history.length > 0) {
-    const lastSession = history[history.length - 1];
+    const recentHistory = history.slice(-5); // Use last 5 sessions for context.
     prompt += `
-      \nUser's Previous Workout History (last session for context, use it to apply progressive overload):
-      ${JSON.stringify(lastSession, null, 2)}
+      \n**CRITICAL: PROGRESSIVE OVERLOAD STRATEGY**
+      You MUST use the user's recent workout history and their 'effort' feedback to inform the new plan. The goal is gradual, science-based progression.
       
-      Based on this history, ensure the new plan is slightly more challenging. For example, you could suggest slightly higher weights, more reps, or an additional set for some exercises where the user has shown consistent performance. When suggesting weights, use the history as a baseline.
+      User's Recent Workout History (for context):
+      ${JSON.stringify(recentHistory, null, 2)}
+      
+      **Follow these rules for EACH exercise in the new plan:**
+      1.  **Analyze Feedback:** Find the most recent performance for the exercise in the history provided. Look at the 'effort' rating ('Easy', 'Good', 'Hard').
+      2.  **If Effort was 'Easy':** The user is finding it too light and is ready for a significant challenge.
+          - **Primary Method (Weight Increase):** Suggest a reasonable but definite weight increment. For major barbell lifts (squats, deadlifts, bench), a 5-10 lbs increase is appropriate. For dumbbell/accessory lifts, suggest 2.5-5 lbs.
+          - **Alternative Method (Advanced Variation):** If weight cannot be increased, or for bodyweight exercises, you MUST suggest a more mechanically difficult variation (e.g., progress from Push-ups to Archer Push-ups).
+      3.  **If Effort was 'Good':** The user is challenged but succeeding. Progression should be steady.
+          - **Primary Method (Volume or Slight Weight Increase):** Suggest either a small weight increase (see 'Easy' rule) OR add one repetition to their target range (e.g., '8-12' becomes '9-13'). Choose the method that seems most appropriate.
+      4.  **If Effort was 'Hard':** The user is at their current limit. Do not increase the weight.
+          - **Method:** Keep the 'suggestedWeight' THE SAME as their last performance. Instead, focus on volume. You can either increase the target repetitions by one (e.g., from '8-12' to '8-13') OR add one additional set. Do not do both. This builds their capacity at the current weight.
+      5.  **If No Feedback or New Exercise:** If an exercise is new or lacks an 'effort' rating in recent history, be conservative. Base the 'suggestedWeight' on their fitness level, height, and weight, aiming for a moderate challenge they can complete with good form.
+      6.  **Maintain Consistency:** When creating a progression, do not drastically change the exercise unless a more advanced variation is explicitly chosen as the progression method. The user expects to see familiar exercises getting harder over time.
     `;
   } else {
     prompt += `\nThis is the user's first plan. Start with foundational exercises suitable for their fitness level.`
@@ -175,7 +187,7 @@ const buildPrompt = (preferences: any, history?: any[]) => {
     2.  Only include exercises performable with the user's available equipment.
     3.  The number of workout days in the plan must exactly match the "Workouts per week" preference.
     4.  Structure the weekly plan to allow for adequate muscle recovery between sessions.
-    5.  Set realistic reps, sets, and rest times for the user's fitness level.
+    5.  **Equipment Context Awareness:** Be mindful of the practical limitations of equipment. For example, if a user has 'Barbell' but NOT 'Squat Rack' or 'Power Rack' in their equipment list, you MUST NOT suggest heavy Barbell Squats that require racking from shoulder height. Instead, suggest safe alternatives like Goblet Squats, Zercher Squats (lifted from the floor), or other leg exercises. Apply this same logic to other exercises like heavy Overhead Press or Bench Press if a rack with spotter arms isn't available.
     6.  **CRITICAL 'suggestedWeight' FORMATTING:** The 'suggestedWeight' field MUST follow strict rules. It can ONLY be a specific weight (e.g., "135 lbs") OR the single word "Bodyweight". Under NO circumstances should you combine them (e.g., "Bodyweight + 25 lbs"). For exercises like Barbell Squats, Bench Press, or Dumbbell Curls, this value represents the total weight to be lifted. For weighted bodyweight exercises like Dips or Pull-ups, this value represents ONLY the *added* weight.
     7.  Use specialized equipment like 'Boxing Heavy Bag' or 'Elliptical Machine' appropriately for cardio, HIIT, warm-ups, or cool-downs.
   `;

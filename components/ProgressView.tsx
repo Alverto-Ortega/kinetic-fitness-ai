@@ -1,5 +1,3 @@
-
-
 import React, { useMemo, useState, useEffect } from 'react';
 import { WorkoutSession, WorkoutPlan } from '../types';
 import { getWorkoutSummary } from '../services/geminiService';
@@ -81,6 +79,9 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ history, isOnline, p
                         </div>
                         <div className="text-right">
                             <p className="text-sm font-medium text-slate-300">{session.exercises.length} {session.exercises.length === 1 ? 'Exercise' : 'Exercises'}</p>
+                            {session.duration && (
+                                <p className={`text-xs ${typography.pMuted}`}>in {Math.round(session.duration / 60)} min</p>
+                            )}
                         </div>
                     </div>
                 ))}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DayWorkout, WorkoutSession, PerformedExercise, PerformedSet, Exercise, Preferences } from '../types.ts';
+import React, { useState, useEffect, useCallback } from 'react';
+import { DayWorkout, WorkoutSession, PerformedExercise, PerformedSet, Exercise, Preferences, ActiveSessionData } from '../types.ts';
 import { useTimer } from '../hooks/useTimer.ts';
 import { useOnlineStatus } from '../hooks/useOnlineStatus.ts';
 import { getExerciseDescription, getAlternativeExercises } from '../services/geminiService.ts';
@@ -13,8 +13,16 @@ interface ActiveWorkoutProps {
   history: WorkoutSession[];
   /** The user's preferences, needed for generating alternative exercises. */
   preferences: Preferences | null;
+  /** The current exercise index, managed by the parent. */
+  exerciseIndex: number;
+  /** The session data, managed by the parent for persistence. */
+  sessionData: ActiveSessionData;
+  /** Callback to update the session data state in the parent. */
+  setSessionData: React.Dispatch<React.SetStateAction<ActiveSessionData | null>>;
+  /** Callback to update the current exercise index in the parent. */
+  setExerciseIndex: React.Dispatch<React.SetStateAction<number>>;
   /** Callback function when the entire workout session is completed. */
-  onWorkoutComplete: (session: WorkoutSession) => void;
+  onWorkoutComplete: (session: Omit<WorkoutSession, 'duration'>) => void;
   /** Callback to cancel the workout and return to the dashboard. */
   onCancel: () => void;
   /** Callback to replace an exercise in the master plan state. */
@@ -30,20 +38,24 @@ const formatTime = (seconds: number) => {
 
 const CARDIO_KEYWORDS = ['Treadmill', 'Elliptical', 'Bike', 'Boxing', 'Cardio', 'Run', 'Jogging', 'Cycling'];
 
-export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, preferences, onWorkoutComplete, onCancel, onExerciseSwap }) => {
+export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
+  workout,
+  history,
+  preferences,
+  exerciseIndex,
+  sessionData,
+  setSessionData,
+  setExerciseIndex,
+  onWorkoutComplete,
+  onCancel,
+  onExerciseSwap,
+}) => {
   // --- STATE ---
   /** The current day's workout, which can be modified if an exercise is swapped. */
   const [activeDayWorkout, setActiveDayWorkout] = useState<DayWorkout>(workout);
-  /** The index of the currently active exercise in the `activeDayWorkout.exercises` array. */
-  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  /** State to hold the user's performance data for the current session as they input it. */
-  const [sessionData, setSessionData] = useState<
-    (Omit<PerformedExercise, 'sets'> & {
-      sets: ({ reps: string; weight?: string })[];
-    })[]
-  >([]);
-  
   const [isResting, setIsResting] = useState(false);
+  /** Stores the index of the set just completed to provide context for the rest timer. */
+  const [lastCompletedSetIndex, setLastCompletedSetIndex] = useState<number | null>(null);
   /** Stores the last weight used for an exercise within this session for easy re-entry. */
   const [lastWeight, setLastWeight] = useState<{ [key: string]: string }>({});
 
@@ -56,9 +68,12 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
   const [isAlternativesModalOpen, setIsAlternativesModalOpen] = useState(false);
 
   const isOnline = useOnlineStatus();
-  const currentExercise = activeDayWorkout.exercises[currentExerciseIndex];
-  const { time, startTimer, stopTimer, resetTimer } = useTimer(currentExercise.rest);
-  
+  const currentExercise = activeDayWorkout.exercises[exerciseIndex];
+
+  // Using useCallback to memoize the function, ensuring the timer hook doesn't re-initialize unnecessarily.
+  const handleRestComplete = useCallback(() => setIsResting(false), []);
+  const { time, startTimer, stopTimer, resetTimer } = useTimer(currentExercise.rest, handleRestComplete);
+
   /** Finds the entire last performance record for the current exercise from history. */
   const previousPerformance = history
       .slice()
@@ -70,19 +85,6 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
   const lastPerformedSetCount = previousPerformance?.sets?.length;
 
   // --- EFFECTS ---
-
-  // Initialize the session data structure when the component mounts with the initial workout.
-  // This now depends on the initial `workout` prop, not the mutable `activeDayWorkout` state,
-  // to prevent data loss when an exercise is swapped locally.
-  useEffect(() => {
-    setSessionData(
-      workout.exercises.map(ex => ({
-        exerciseName: ex.name,
-        sets: Array.from({ length: parseInt(ex.sets, 10) }, () => ({ reps: '', weight: '' })),
-        effort: undefined,
-      }))
-    );
-  }, [workout]);
   
   // Reset state when moving to a new exercise.
   useEffect(() => {
@@ -90,17 +92,18 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
     setShowDescription(false);
     setDescription('');
     setAlternatives([]);
-  }, [currentExerciseIndex, currentExercise, resetTimer]);
+  }, [exerciseIndex, currentExercise, resetTimer]);
 
-  const allSetsCompleted = sessionData[currentExerciseIndex]?.sets.every(s => s.reps);
+  const allSetsCompleted = sessionData[exerciseIndex]?.sets.every(s => s.reps);
 
   // --- HANDLERS ---
 
   /** Updates the sessionData state when the user types in a rep or weight input field. */
   const handleSetChange = (setIndex: number, field: 'reps' | 'weight', value: string) => {
     setSessionData(prev => {
+        if (!prev) return null;
         const updated = [...prev];
-        const exerciseData = { ...updated[currentExerciseIndex] };
+        const exerciseData = { ...updated[exerciseIndex] };
         const setData = { ...exerciseData.sets[setIndex] };
         
         let sanitizedValue = '';
@@ -137,7 +140,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
         }
 
         exerciseData.sets[setIndex] = setData;
-        updated[currentExerciseIndex] = exerciseData;
+        updated[exerciseIndex] = exerciseData;
         return updated;
     });
   };
@@ -196,14 +199,15 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
     // 2. Update the local workout state for this session to update the UI.
     setActiveDayWorkout(currentWorkout => {
         const newExercises = [...currentWorkout.exercises];
-        newExercises[currentExerciseIndex] = newExercise;
+        newExercises[exerciseIndex] = newExercise;
         return { ...currentWorkout, exercises: newExercises };
     });
 
     // 3. Manually update sessionData for the swapped exercise, preserving data for other exercises.
     setSessionData(prev => {
+        if (!prev) return null;
         const updated = [...prev];
-        updated[currentExerciseIndex] = {
+        updated[exerciseIndex] = {
             exerciseName: newExercise.name,
             sets: Array.from({ length: parseInt(newExercise.sets, 10) }, () => ({ reps: '', weight: '' })),
             effort: undefined,
@@ -226,8 +230,8 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
   const handleNextExercise = () => {
     stopTimer();
     setIsResting(false);
-    if (currentExerciseIndex < activeDayWorkout.exercises.length - 1) {
-      setCurrentExerciseIndex(prev => prev + 1);
+    if (exerciseIndex < activeDayWorkout.exercises.length - 1) {
+      setExerciseIndex(prev => prev + 1);
     } else {
       handleFinishWorkout();
     }
@@ -235,7 +239,8 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
 
   /** Compiles the session data and calls the onWorkoutComplete callback. */
   const handleFinishWorkout = () => {
-    const finalSession: WorkoutSession = {
+    if (!sessionData) return;
+    const finalSession: Omit<WorkoutSession, 'duration'> = {
       date: new Date().toISOString(),
       day: activeDayWorkout.day,
       exercises: sessionData
@@ -260,6 +265,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
   const handleSetCompleted = (setIndex: number) => {
       // Don't start a rest timer after the last set.
       if (setIndex < parseInt(currentExercise.sets, 10) - 1) {
+          setLastCompletedSetIndex(setIndex);
           setIsResting(true);
           startTimer(currentExercise.rest);
       }
@@ -268,8 +274,9 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
   /** Saves the user's effort feedback and automatically moves to the next exercise. */
   const handleEffortSelect = (effort: 'Easy' | 'Good' | 'Hard') => {
      setSessionData(prev => {
+        if (!prev) return null;
         const updated = [...prev];
-        updated[currentExerciseIndex].effort = effort;
+        updated[exerciseIndex].effort = effort;
         return updated;
      });
      // Use a short delay to provide visual feedback before moving on.
@@ -283,19 +290,18 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
 
   // Render the full-screen rest timer overlay.
   if (isResting) {
+    const totalSets = parseInt(currentExercise.sets, 10);
+    const nextSetNumber = (lastCompletedSetIndex ?? -1) + 2; // 0-indexed + 1 for next, +1 for 1-based display
+    const nextUpText = `Set ${nextSetNumber} of ${totalSets}`;
+    
     return (
         <div className="fixed inset-0 bg-black bg-opacity-90 flex flex-col justify-center items-center text-center p-6 animate-fade-in z-50">
             <h2 className="text-3xl font-bold text-slate-300 mb-4">Rest</h2>
             <p className="text-8xl font-mono font-extrabold text-indigo-400 mb-8">{formatTime(time)}</p>
-            <div className="space-x-4">
-              <button onClick={() => { setIsResting(false); stopTimer(); }} className={button.secondary}>
-                  Skip Rest
-              </button>
-               <button onClick={handleNextExercise} className="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 px-8 rounded-lg">
-                  Next Exercise
-              </button>
-            </div>
-             <p className={`${typography.pMuted} mt-12`}>Next up: {activeDayWorkout.exercises[currentExerciseIndex + 1]?.name || 'Final Exercise'}</p>
+            <button onClick={() => { stopTimer(); handleRestComplete(); }} className={button.secondary}>
+                Skip Rest
+            </button>
+            <p className={`${typography.pMuted} mt-12`}>Next up: {nextUpText}</p>
         </div>
     )
   }
@@ -306,7 +312,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
         <div className="flex justify-between items-start mb-2 gap-4">
             <div>
                  <h1 className={typography.h1.replace('md:text-6xl', 'md:text-5xl')}>{currentExercise.name}</h1>
-                 <p className={typography.pMuted}>Exercise {currentExerciseIndex + 1} of {activeDayWorkout.exercises.length}</p>
+                 <p className={typography.pMuted}>Exercise {exerciseIndex + 1} of {activeDayWorkout.exercises.length}</p>
             </div>
             <div className="flex-shrink-0">
                 <button onClick={onCancel} className={button.tertiary}>
@@ -324,7 +330,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
             </div>
         )}
 
-        <div className="mb-6 flex gap-4">
+        <div className="mb-6 flex flex-wrap gap-4 items-center">
             <button
                 onClick={handleShowDescription}
                 className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 text-sm font-semibold flex items-center gap-1 disabled:opacity-50"
@@ -346,6 +352,9 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
                   {isLoadingAlternatives ? 'Loading...' : 'Swap Exercise'}
               </button>
             )}
+            <button onClick={handleNextExercise} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-semibold">
+                Skip Exercise &rarr;
+            </button>
         </div>
         
         {showDescription && (
@@ -386,7 +395,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
                                 <input
                                     type="tel"
                                     placeholder={`Last: ${lastPerformedSet?.weight || 'N/A'}`}
-                                    value={sessionData[currentExerciseIndex]?.sets[i]?.weight || ''}
+                                    value={sessionData[exerciseIndex]?.sets[i]?.weight || ''}
                                     onChange={(e) => handleSetChange(i, 'weight', e.target.value)}
                                     className={form.textInput}
                                 />
@@ -397,12 +406,12 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
                             <input
                                 type="tel"
                                 placeholder={currentExercise.reps.split('-')[0]}
-                                value={sessionData[currentExerciseIndex]?.sets[i]?.reps || ''}
+                                value={sessionData[exerciseIndex]?.sets[i]?.reps || ''}
                                 onChange={(e) => handleSetChange(i, 'reps', e.target.value)}
                                 className={form.textInput}
                             />
                         </div>
-                        <button onClick={() => handleSetCompleted(i)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2 rounded-md disabled:bg-slate-500 dark:disabled:bg-slate-600" disabled={!sessionData[currentExerciseIndex]?.sets[i]?.reps}>
+                        <button onClick={() => handleSetCompleted(i)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2 rounded-md disabled:bg-slate-500 dark:disabled:bg-slate-600" disabled={!sessionData[exerciseIndex]?.sets[i]?.reps}>
                             ✓
                         </button>
                     </div>
@@ -426,7 +435,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({ workout, history, 
                 End Workout
             </button>
             <button onClick={handleNextExercise} disabled={!allSetsCompleted} className={button.primary.replace('w-full', '')}>
-                {currentExerciseIndex === activeDayWorkout.exercises.length - 1 ? 'Finish Workout' : 'Next Exercise'}
+                {exerciseIndex === activeDayWorkout.exercises.length - 1 ? 'Finish Workout' : 'Next Exercise'}
             </button>
         </div>
         

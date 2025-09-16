@@ -53,6 +53,8 @@ export interface WorkoutSession {
   day: string;
   /** An array of exercises performed during the session. */
   exercises: PerformedExercise[];
+  /** The total duration of the session in seconds. Optional for backwards compatibility. */
+  duration?: number;
 }
 
 /** Stores the result of a single AI physique analysis. */
@@ -86,3 +88,8 @@ export interface Preferences {
   weight: string;
   injuries: string;
 }
+
+/** The data structure for an in-progress workout session, used for state persistence. */
+export type ActiveSessionData = (Omit<PerformedExercise, 'sets'> & {
+  sets: ({ reps: string; weight?: string })[];
+})[];

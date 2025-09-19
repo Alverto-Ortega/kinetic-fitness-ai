@@ -10,6 +10,8 @@ export interface Exercise {
   rest: number;
   /** AI's suggested starting weight (e.g., "135 lbs") or "Bodyweight". */
   suggestedWeight?: string;
+  /** Rest time in seconds after completing the entire exercise. */
+  restAfterExercise?: number;
 }
 
 /** Defines the structure for a single day's workout session within a plan. */

@@ -19,6 +19,7 @@ interface PlanDashboardProps {
   hasSeenInitialPrompt: boolean;
   isOnline: boolean;
   planGenerationQueued: boolean;
+  lastSummary: string;
   onStartWorkout: (workout: DayWorkout) => void;
   onResetPlan: () => void;
   onUpdateExercise: (day: string, originalExerciseName: string, newExercise: Exercise) => void;
@@ -55,7 +56,7 @@ const dayNameToIndex: { [key: string]: number } = {
   'Thursday': 4, 'Friday': 5, 'Saturday': 6
 };
 
-export const PlanDashboard: React.FC<PlanDashboardProps> = ({ plan, history, analysisHistory, streak, preferences, completedDays, hasCompletedFirstPhase, hasSeenInitialPrompt, isOnline, planGenerationQueued, onStartWorkout, onResetPlan, onUpdateExercise, onOpenAnalysisModal }) => {
+export const PlanDashboard: React.FC<PlanDashboardProps> = ({ plan, history, analysisHistory, streak, preferences, completedDays, hasCompletedFirstPhase, hasSeenInitialPrompt, isOnline, planGenerationQueued, lastSummary, onStartWorkout, onResetPlan, onUpdateExercise, onOpenAnalysisModal }) => {
   const [selectedWorkout, setSelectedWorkout] = useState<DayWorkout | null>(null);
   const [workoutForWarmUp, setWorkoutForWarmUp] = useState<DayWorkout | null>(null);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -72,6 +73,7 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({ plan, history, ana
         preferences,
         completedDays,
         hasCompletedFirstPhase,
+        lastSummary,
     };
     const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
     const link = document.createElement('a');
@@ -234,7 +236,7 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({ plan, history, ana
         })}
       </div>
 
-      <ProgressView history={history} isOnline={isOnline} plan={plan} />
+      <ProgressView history={history} isOnline={isOnline} plan={plan} lastSummary={lastSummary} />
 
       <AnalysisHistoryView history={analysisHistory} />
       

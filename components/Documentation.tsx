@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-// FIX: Add 'notice' to the import to fix a reference error.
 import { layout, typography, button, misc, notice } from '../styles/theme';
 
 interface DocumentationProps {

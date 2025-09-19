@@ -10,7 +10,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { Documentation } from './components/Documentation';
 import { FAQ } from './components/FAQ';
 import { AppFooter } from './components/AppFooter';
-import { generateWorkoutPlan, checkProgressForScheduleChange } from './services/geminiService';
+import { generateWorkoutPlan, checkProgressForScheduleChange, getWorkoutSummary } from './services/geminiService';
 import { AutoGenerationLoader } from './components/AutoGenerationLoader';
 import { ScheduleSuggestionModal } from './components/ScheduleSuggestionModal';
 import { OfflineWarning } from './components/OfflineWarning';
@@ -62,6 +62,8 @@ function App() {
   const [hasSeenInitialPrompt, setHasSeenInitialPrompt] = useStickyState<boolean>(false, 'kinetix-has-seen-initial-prompt');
   /** The current theme ('light' or 'dark'). */
   const [theme, setTheme] = useStickyState<'light' | 'dark'>('dark', 'kinetix-theme');
+  /** The last AI-generated workout summary. Persisted to prevent re-generation on page load. */
+  const [lastSummary, setLastSummary] = useStickyState<string>('', 'kinetix-last-summary');
   
   // --- LOCAL UI STATE & PERSISTED ACTIVE WORKOUT STATE ---
   /** Holds the workout object for the currently active session. Null if no workout is active. */
@@ -130,7 +132,7 @@ function App() {
   };
   
   /** Handles importing all application data from a JSON file. */
-  const handleImportData = (data: { plan: WorkoutPlan; workoutHistory: any[]; streak: any; preferences?: Partial<Preferences>; completedDays?: string[], analysisHistory?: BodyAnalysis[], hasCompletedFirstPhase?: boolean }) => {
+  const handleImportData = (data: { plan: WorkoutPlan; workoutHistory: any[]; streak: any; preferences?: Partial<Preferences>; completedDays?: string[], analysisHistory?: BodyAnalysis[], hasCompletedFirstPhase?: boolean, lastSummary?: string }) => {
     setWorkoutPlan(data.plan);
     setWorkoutHistory(data.workoutHistory);
     setStreak(data.streak || { current: 0, lastWorkoutDate: '' });
@@ -157,6 +159,7 @@ function App() {
     setCompletedDays(data.completedDays || []);
     setAnalysisHistory(data.analysisHistory || []);
     setHasCompletedFirstPhase(data.hasCompletedFirstPhase || false);
+    setLastSummary(data.lastSummary || '');
     setHasSeenInitialPrompt(true); // Assume imported data means they are past the initial prompt phase.
   };
   
@@ -276,6 +279,19 @@ function App() {
     setWorkoutHistory(updatedHistory);
     updateStreak(session.date);
     clearActiveWorkoutState();
+    
+    // After history is updated, generate and store the new AI summary.
+    if (isOnline) {
+        try {
+            const summary = await getWorkoutSummary(updatedHistory, workoutPlan);
+            setLastSummary(summary);
+        } catch (e) {
+            console.error("Failed to generate workout summary on completion:", e);
+            setLastSummary("Couldn't generate a summary, but great work!"); // Fallback
+        }
+    } else {
+        setLastSummary("Complete your next workout while online to get a new AI insight.");
+    }
 
     const updatedCompletedDays = Array.from(new Set([...completedDays, session.day]));
     setCompletedDays(updatedCompletedDays);
@@ -348,6 +364,7 @@ function App() {
       'kinetix-active-exercise-index',
       'kinetix-active-session-data',
       'kinetix-workout-start-time',
+      'kinetix-last-summary',
     ];
 
     // Clear all items from localStorage.
@@ -372,6 +389,7 @@ function App() {
     setPlanGenerationQueued(false);
     setHasSeenInitialPrompt(false);
     setTheme('dark'); // Reset to default theme
+    setLastSummary('');
     clearActiveWorkoutState();
 
     // Finally, reload the page to ensure the application starts fresh from its initial state.
@@ -426,22 +444,29 @@ function App() {
   }
 
   if (activeWorkout && activeSessionData) {
-    return <ActiveWorkout 
-              workout={activeWorkout} 
-              history={workoutHistory}
-              preferences={preferences}
-              exerciseIndex={activeExerciseIndex}
-              sessionData={activeSessionData}
-              setSessionData={setActiveSessionData}
-              setExerciseIndex={setActiveExerciseIndex}
-              onWorkoutComplete={handleWorkoutComplete} 
-              onCancel={handleCancelWorkout} 
-              onExerciseSwap={handleUpdateExerciseInPlan}
-            />;
+    return (
+      <div id="page-container" className={layout.pageContainer}>
+        <OfflineWarning isOnline={isOnline} />
+        <main className={layout.mainContent}>
+          <ActiveWorkout
+            workout={activeWorkout}
+            history={workoutHistory}
+            preferences={preferences}
+            exerciseIndex={activeExerciseIndex}
+            sessionData={activeSessionData}
+            setSessionData={setActiveSessionData}
+            setExerciseIndex={setActiveExerciseIndex}
+            onWorkoutComplete={handleWorkoutComplete}
+            onCancel={handleCancelWorkout}
+            onExerciseSwap={handleUpdateExerciseInPlan}
+          />
+        </main>
+      </div>
+    );
   }
 
   return (
-    <div className={layout.pageContainer}>
+    <div id="page-container" className={layout.pageContainer}>
       <OfflineWarning isOnline={isOnline} />
       <main className={layout.mainContent}>
         {workoutPlan ? (
@@ -456,6 +481,7 @@ function App() {
             hasSeenInitialPrompt={hasSeenInitialPrompt}
             isOnline={isOnline}
             planGenerationQueued={planGenerationQueued}
+            lastSummary={lastSummary}
             onStartWorkout={handleStartWorkout}
             onResetPlan={handleResetPlan}
             onUpdateExercise={handleUpdateExerciseInPlan}

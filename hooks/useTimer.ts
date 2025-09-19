@@ -142,13 +142,15 @@ function useInterval(callback: () => void, delay: number | null) {
  * It uses timestamps (Date.now()) for calculation instead of relying solely on setInterval.
  * @param initialTime The initial time for the timer in seconds.
  * @param onComplete Optional callback to execute when the timer finishes.
+ * @param onWarning Optional callback to execute when the timer is nearing completion (<= 5 seconds).
  * @returns An object with timer state and control functions.
  */
-export const useTimer = (initialTime: number, onComplete?: () => void) => {
+export const useTimer = (initialTime: number, onComplete?: () => void, onWarning?: () => void) => {
   const [time, setTime] = useState(initialTime);
   const [isActive, setIsActive] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const endTimeRef = useRef<number | null>(null);
+  const warningTriggeredRef = useRef(false);
 
   // Effect to generate the beep sound once on mount.
   useEffect(() => {
@@ -181,12 +183,19 @@ export const useTimer = (initialTime: number, onComplete?: () => void) => {
     // This ensures accuracy even if the interval ticks are delayed by the browser.
     const remaining = Math.round((endTimeRef.current - Date.now()) / 1000);
 
+    // Trigger the warning callback if applicable.
+    if (onWarning && remaining <= 5 && remaining > 0 && !warningTriggeredRef.current) {
+        onWarning();
+        warningTriggeredRef.current = true;
+    }
+
     if (remaining > 0) {
       setTime(remaining);
     } else {
       setTime(0);
       setIsActive(false);
       endTimeRef.current = null;
+      warningTriggeredRef.current = false; // Reset for next run.
       // Play a sound when the timer finishes.
       audioRef.current?.play().catch(e => console.error("Audio play failed:", e));
       onComplete?.();
@@ -198,17 +207,20 @@ export const useTimer = (initialTime: number, onComplete?: () => void) => {
     // Set a specific timestamp for when the timer should end.
     endTimeRef.current = Date.now() + newTime * 1000;
     setIsActive(true);
+    warningTriggeredRef.current = false;
   }, []);
   
   const stopTimer = useCallback(() => {
     setIsActive(false);
     endTimeRef.current = null;
+    warningTriggeredRef.current = false;
   }, []);
 
   const resetTimer = useCallback((newTime: number) => {
       setIsActive(false);
       endTimeRef.current = null;
       setTime(newTime);
+      warningTriggeredRef.current = false;
   }, []);
 
   return { time, isActive, startTimer, stopTimer, resetTimer };

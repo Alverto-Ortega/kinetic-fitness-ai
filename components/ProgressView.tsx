@@ -1,6 +1,5 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { WorkoutSession, WorkoutPlan } from '../types';
-import { getWorkoutSummary } from '../services/geminiService';
 import { card, typography } from '../styles/theme';
 
 interface ProgressViewProps {
@@ -10,28 +9,13 @@ interface ProgressViewProps {
   isOnline: boolean;
   /** The current workout plan, for providing context to the AI summary. */
   plan: WorkoutPlan | null;
+  /** The last AI-generated workout summary, persisted in the main app state. */
+  lastSummary: string;
 }
 
-export const ProgressView: React.FC<ProgressViewProps> = ({ history, isOnline, plan }) => {
-    const [summary, setSummary] = useState('');
-    const [isSummaryLoading, setIsSummaryLoading] = useState(true);
-
+export const ProgressView: React.FC<ProgressViewProps> = ({ history, isOnline, plan, lastSummary }) => {
     // useMemo ensures that the total workout count is only recalculated when the history array changes.
     const totalWorkouts = useMemo(() => history.length, [history]);
-
-    // This effect fetches the AI-generated summary when the component mounts or when the history changes.
-    useEffect(() => {
-        if (history.length > 0 && isOnline) {
-            setIsSummaryLoading(true);
-            getWorkoutSummary(history, plan)
-                .then(setSummary)
-                .finally(() => setIsSummaryLoading(false));
-        } else {
-            // If offline or no history, no need to load anything.
-            setIsSummaryLoading(false);
-            setSummary('');
-        }
-    }, [history, isOnline, plan]);
 
     if (history.length === 0) {
       return (
@@ -56,15 +40,10 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ history, isOnline, p
                 {/* AI Insight */}
                 <div className="bg-slate-800 p-4 rounded-lg md:col-span-2 flex flex-col justify-center">
                     <h4 className="font-semibold text-white mb-2 text-sm">AI Insight</h4>
-                    {isSummaryLoading ? (
-                        <div className="space-y-2">
-                            <div className="h-2.5 bg-slate-700 rounded-full w-4/5 animate-pulse"></div>
-                            <div className="h-2.5 bg-slate-700 rounded-full w-3/5 animate-pulse"></div>
-                        </div>
-                    ) : !isOnline ? (
-                        <p className="text-sm text-amber-300">Connect to the internet to get new AI insights.</p>
+                    {lastSummary ? (
+                        <p className={`text-sm ${typography.p} italic`}>"{lastSummary}"</p>
                     ) : (
-                        <p className={`text-sm ${typography.p} italic`}>"{summary}"</p>
+                         <p className={`text-sm ${typography.pMuted}`}>Complete a workout while online to get your first AI insight.</p>
                     )}
                 </div>
             </div>

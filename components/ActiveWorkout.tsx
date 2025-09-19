@@ -3,6 +3,7 @@ import { DayWorkout, WorkoutSession, PerformedExercise, PerformedSet, Exercise, 
 import { useTimer } from '../hooks/useTimer.ts';
 import { useOnlineStatus } from '../hooks/useOnlineStatus.ts';
 import { getExerciseDescription, getAlternativeExercises } from '../services/geminiService.ts';
+import { parseDuration } from '../utils/workoutUtils.ts';
 import { AlternativeExercisesModal } from './AlternativeExercisesModal.tsx';
 import { typography, form, button, card, layout } from '../styles/theme.ts';
 
@@ -38,6 +39,36 @@ const formatTime = (seconds: number) => {
 
 const CARDIO_KEYWORDS = ['Treadmill', 'Elliptical', 'Bike', 'Boxing', 'Cardio', 'Run', 'Jogging', 'Cycling'];
 
+// --- Timer Visual Effect Handlers ---
+const getPageContainer = () => document.getElementById('page-container');
+
+/** Triggers a subtle, continuous pulsing flash to warn that a timer is ending. */
+const triggerWarningFlash = () => {
+    const el = getPageContainer();
+    if (el) {
+        el.classList.remove('timer-completion-flash');
+        el.classList.add('timer-warning-flash');
+    }
+};
+
+/** Removes the warning flash effect. */
+const clearWarningFlash = () => {
+    getPageContainer()?.classList.remove('timer-warning-flash');
+};
+
+/** Triggers a distinct, multi-flash effect to signal timer completion. */
+const triggerCompletionFlash = () => {
+    const el = getPageContainer();
+    if (el) {
+        el.classList.remove('timer-warning-flash');
+        el.classList.add('timer-completion-flash');
+        setTimeout(() => {
+            el.classList.remove('timer-completion-flash');
+        }, 2000); // Animation is 500ms * 4 = 2000ms
+    }
+};
+
+
 export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
   workout,
   history,
@@ -53,7 +84,12 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
   // --- STATE ---
   /** The current day's workout, which can be modified if an exercise is swapped. */
   const [activeDayWorkout, setActiveDayWorkout] = useState<DayWorkout>(workout);
+  /** State for the inter-set rest timer. */
   const [isResting, setIsResting] = useState(false);
+  /** State for the inter-exercise rest timer. */
+  const [isRestingBetweenExercises, setIsRestingBetweenExercises] = useState(false);
+  /** State for showing the full-screen exercise timer overlay. */
+  const [isExerciseTimerRunning, setIsExerciseTimerRunning] = useState(false);
   /** Stores the index of the set just completed to provide context for the rest timer. */
   const [lastCompletedSetIndex, setLastCompletedSetIndex] = useState<number | null>(null);
   /** Stores the last weight used for an exercise within this session for easy re-entry. */
@@ -66,179 +102,17 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
   const [alternatives, setAlternatives] = useState<Exercise[]>([]);
   const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
   const [isAlternativesModalOpen, setIsAlternativesModalOpen] = useState(false);
+  
+  // State for the duration-based exercise timer.
+  const [timedSetIndex, setTimedSetIndex] = useState<number | null>(null);
 
   const isOnline = useOnlineStatus();
   const currentExercise = activeDayWorkout.exercises[exerciseIndex];
 
-  // Using useCallback to memoize the function, ensuring the timer hook doesn't re-initialize unnecessarily.
-  const handleRestComplete = useCallback(() => setIsResting(false), []);
-  const { time, startTimer, stopTimer, resetTimer } = useTimer(currentExercise.rest, handleRestComplete);
-
-  /** Finds the entire last performance record for the current exercise from history. */
-  const previousPerformance = history
-      .slice()
-      .reverse()
-      .flatMap(s => s.exercises)
-      .find(e => e.exerciseName === currentExercise.name);
+  // --- TIMERS & CORE HANDLERS ---
   
-  const lastPerformedSet = previousPerformance?.sets?.slice(-1)[0];
-  const lastPerformedSetCount = previousPerformance?.sets?.length;
-
-  // --- EFFECTS ---
-  
-  // Reset state when moving to a new exercise.
-  useEffect(() => {
-    resetTimer(currentExercise.rest);
-    setShowDescription(false);
-    setDescription('');
-    setAlternatives([]);
-  }, [exerciseIndex, currentExercise, resetTimer]);
-
-  const allSetsCompleted = sessionData[exerciseIndex]?.sets.every(s => s.reps);
-
-  // --- HANDLERS ---
-
-  /** Updates the sessionData state when the user types in a rep or weight input field. */
-  const handleSetChange = (setIndex: number, field: 'reps' | 'weight', value: string) => {
-    setSessionData(prev => {
-        if (!prev) return null;
-        const updated = [...prev];
-        const exerciseData = { ...updated[exerciseIndex] };
-        const setData = { ...exerciseData.sets[setIndex] };
-        
-        let sanitizedValue = '';
-        if (field === 'reps') {
-            // For reps, allow only whole numbers. No decimals.
-            sanitizedValue = value.replace(/[^0-9]/g, '');
-        } else { // field === 'weight'
-            // For weight, allow numbers and a single decimal point.
-            // First, remove any non-digit/non-period characters.
-            let cleanedValue = value.replace(/[^0-9.]/g, '');
-
-            // Automatically prepend '0' if the user starts with a period.
-            if (cleanedValue.startsWith('.')) {
-                cleanedValue = '0' + cleanedValue;
-            }
-
-            // Then, ensure there's at most one period.
-            const parts = cleanedValue.split('.');
-            if (parts.length > 2) {
-                // If there are multiple periods, reconstruct with only the first one.
-                // e.g., "1.2.3" becomes "1.23"
-                sanitizedValue = `${parts[0]}.${parts.slice(1).join('')}`;
-            } else {
-                sanitizedValue = cleanedValue;
-            }
-        }
-
-        if (field === 'weight') {
-             setData.weight = sanitizedValue;
-             // Store the weight locally for the 'Use last' button.
-             setLastWeight(lw => ({...lw, [currentExercise.name]: sanitizedValue}));
-        } else {
-             setData.reps = sanitizedValue;
-        }
-
-        exerciseData.sets[setIndex] = setData;
-        updated[exerciseIndex] = exerciseData;
-        return updated;
-    });
-  };
-
-  /** Fetches and displays the "how-to" description for the current exercise. */
-  const handleShowDescription = async () => {
-    if (showDescription) {
-        setShowDescription(false);
-        return;
-    }
-    
-    setShowDescription(true);
-    // Don't re-fetch if already loaded or if offline.
-    if (description || !isOnline) return; 
-
-    setIsDescriptionLoading(true);
-    try {
-        const desc = await getExerciseDescription(currentExercise.name);
-        setDescription(desc);
-    } catch (error) {
-        setDescription("Failed to load description.");
-    } finally {
-        setIsDescriptionLoading(false);
-    }
-  };
-
-  /** Fetches and displays AI-generated alternative exercises in a modal. */
-  const handleFetchAlternatives = async () => {
-    if (isAlternativesModalOpen) {
-        setIsAlternativesModalOpen(false);
-        return;
-    }
-
-    setIsAlternativesModalOpen(true);
-    if (alternatives.length > 0 || !isOnline) return;
-    if (!preferences?.equipment) return;
-
-    setIsLoadingAlternatives(true);
-    try {
-        const currentDayExerciseNames = activeDayWorkout.exercises.map(ex => ex.name);
-        const alts = await getAlternativeExercises(currentExercise, preferences.equipment, currentDayExerciseNames);
-        setAlternatives(alts);
-    } finally {
-        setIsLoadingAlternatives(false);
-    }
-  };
-
-
-  /** Handles the user selecting an alternative exercise, updating both local and parent state. */
-  const handleSelectAlternative = (newExercise: Exercise) => {
-    const originalExerciseName = currentExercise.name;
-
-    // 1. Update the master plan in App.tsx.
-    onExerciseSwap(activeDayWorkout.day, originalExerciseName, newExercise);
-
-    // 2. Update the local workout state for this session to update the UI.
-    setActiveDayWorkout(currentWorkout => {
-        const newExercises = [...currentWorkout.exercises];
-        newExercises[exerciseIndex] = newExercise;
-        return { ...currentWorkout, exercises: newExercises };
-    });
-
-    // 3. Manually update sessionData for the swapped exercise, preserving data for other exercises.
-    setSessionData(prev => {
-        if (!prev) return null;
-        const updated = [...prev];
-        updated[exerciseIndex] = {
-            exerciseName: newExercise.name,
-            sets: Array.from({ length: parseInt(newExercise.sets, 10) }, () => ({ reps: '', weight: '' })),
-            effort: undefined,
-        };
-        return updated;
-    });
-
-    setIsAlternativesModalOpen(false);
-  };
-
-  /** Fills the weight input for a set with the last used weight. */
-  const useLastWeight = (setIndex: number) => {
-    const weightToUse = lastWeight[currentExercise.name] || lastPerformedSet?.weight || '';
-    if (weightToUse) {
-        handleSetChange(setIndex, 'weight', String(weightToUse));
-    }
-  };
-  
-  /** Moves to the next exercise or finishes the workout if it's the last one. */
-  const handleNextExercise = () => {
-    stopTimer();
-    setIsResting(false);
-    if (exerciseIndex < activeDayWorkout.exercises.length - 1) {
-      setExerciseIndex(prev => prev + 1);
-    } else {
-      handleFinishWorkout();
-    }
-  };
-
   /** Compiles the session data and calls the onWorkoutComplete callback. */
-  const handleFinishWorkout = () => {
+  const handleFinishWorkout = useCallback(() => {
     if (!sessionData) return;
     const finalSession: Omit<WorkoutSession, 'duration'> = {
       date: new Date().toISOString(),
@@ -259,19 +133,222 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
         .filter(ex => ex.sets.length > 0)
     };
     onWorkoutComplete(finalSession);
-  };
+  }, [sessionData, activeDayWorkout.day, onWorkoutComplete]);
+
+  /** Contains the logic to advance to the next exercise or finish the workout. */
+  const moveToNextExerciseLogic = useCallback(() => {
+    setIsResting(false);
+    setIsRestingBetweenExercises(false);
+    if (exerciseIndex < activeDayWorkout.exercises.length - 1) {
+        setExerciseIndex(prev => prev + 1);
+    } else {
+        handleFinishWorkout();
+    }
+  }, [exerciseIndex, activeDayWorkout.exercises.length, setExerciseIndex, handleFinishWorkout]);
+
+  /** A unified callback for the timer that routes logic based on the current rest state. */
+  const handleTimerComplete = useCallback(() => {
+    clearWarningFlash();
+    triggerCompletionFlash();
+    if (isResting) {
+        setIsResting(false);
+    } else if (isRestingBetweenExercises) {
+        moveToNextExerciseLogic();
+    }
+  }, [isResting, isRestingBetweenExercises, moveToNextExerciseLogic]);
+
+  const { time, startTimer, stopTimer, resetTimer } = useTimer(0, handleTimerComplete, triggerWarningFlash);
   
+  /** Updates the sessionData state when the user types in a rep or weight input field. */
+  const handleSetChange = useCallback((setIndex: number, field: 'reps' | 'weight', value: string) => {
+    setSessionData(prev => {
+        if (!prev) return null;
+        const updated = [...prev];
+        const exerciseData = { ...updated[exerciseIndex] };
+        const setData = { ...exerciseData.sets[setIndex] };
+        
+        let sanitizedValue = '';
+        if (field === 'reps') {
+            sanitizedValue = value.replace(/[^0-9]/g, '');
+        } else {
+            let cleanedValue = value.replace(/[^0-9.]/g, '');
+            if (cleanedValue.startsWith('.')) {
+                cleanedValue = '0' + cleanedValue;
+            }
+            const parts = cleanedValue.split('.');
+            sanitizedValue = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : cleanedValue;
+        }
+
+        if (field === 'weight') {
+             setData.weight = sanitizedValue;
+             setLastWeight(lw => ({...lw, [currentExercise.name]: sanitizedValue}));
+        } else {
+             setData.reps = sanitizedValue;
+        }
+
+        exerciseData.sets[setIndex] = setData;
+        updated[exerciseIndex] = exerciseData;
+        return updated;
+    });
+  }, [setSessionData, exerciseIndex, currentExercise.name]);
+
   /** Called when a user marks a set as complete, starting the rest timer. */
-  const handleSetCompleted = (setIndex: number) => {
-      // Don't start a rest timer after the last set.
+  const handleSetCompleted = useCallback((setIndex: number) => {
       if (setIndex < parseInt(currentExercise.sets, 10) - 1) {
           setLastCompletedSetIndex(setIndex);
           setIsResting(true);
           startTimer(currentExercise.rest);
       }
+  }, [currentExercise.sets, currentExercise.rest, startTimer]);
+
+  const handleExerciseTimerComplete = useCallback(() => {
+    clearWarningFlash();
+    triggerCompletionFlash();
+    setIsExerciseTimerRunning(false);
+    if (timedSetIndex === null) return;
+    const durationValue = parseDuration(currentExercise.reps);
+    if (durationValue) {
+      handleSetChange(timedSetIndex, 'reps', String(durationValue));
+    }
+    handleSetCompleted(timedSetIndex);
+    setTimedSetIndex(null);
+  }, [timedSetIndex, currentExercise.reps, handleSetChange, handleSetCompleted]);
+
+  const { time: exerciseTime, startTimer: startExerciseTimer, stopTimer: stopExerciseTimer, resetTimer: resetExerciseTimer } = useTimer(0, handleExerciseTimerComplete, triggerWarningFlash);
+
+  /** Stops the exercise timer, logs the elapsed time, and completes the set. */
+  const handleStopExerciseTimer = useCallback(() => {
+      if (timedSetIndex === null) return;
+      const durationValue = parseDuration(currentExercise.reps);
+      if (durationValue === null) return;
+
+      stopExerciseTimer();
+      clearWarningFlash();
+      setIsExerciseTimerRunning(false);
+      const timeElapsed = durationValue - exerciseTime;
+      const loggedTime = Math.max(0, Math.round(timeElapsed));
+      handleSetChange(timedSetIndex, 'reps', String(loggedTime));
+      handleSetCompleted(timedSetIndex);
+      setTimedSetIndex(null);
+  }, [timedSetIndex, currentExercise.reps, stopExerciseTimer, exerciseTime, handleSetChange, handleSetCompleted]);
+  
+  const handleStartExerciseTimer = useCallback((setIndex: number) => {
+    const duration = parseDuration(currentExercise.reps);
+    if (duration === null) return;
+
+    setTimedSetIndex(setIndex);
+    startExerciseTimer(duration);
+    setIsExerciseTimerRunning(true);
+  }, [currentExercise.reps, startExerciseTimer]);
+
+  const previousPerformance = history
+      .slice()
+      .reverse()
+      .flatMap(s => s.exercises)
+      .find(e => e.exerciseName === currentExercise.name);
+  
+  const lastPerformedSet = previousPerformance?.sets?.slice(-1)[0];
+  const lastPerformedSetCount = previousPerformance?.sets?.length;
+
+  // --- EFFECTS ---
+  
+  useEffect(() => {
+    resetTimer(currentExercise.rest);
+    setShowDescription(false);
+    setDescription('');
+    setAlternatives([]);
+    stopExerciseTimer();
+    setTimedSetIndex(null);
+    resetExerciseTimer(0);
+    clearWarningFlash();
+  }, [exerciseIndex, currentExercise, resetTimer, stopExerciseTimer, resetExerciseTimer]);
+
+  const allSetsCompleted = sessionData[exerciseIndex]?.sets.every(s => s.reps);
+
+  // --- HANDLERS ---
+
+  const handleShowDescription = async () => {
+    if (showDescription) {
+        setShowDescription(false);
+        return;
+    }
+    setShowDescription(true);
+    if (description || !isOnline) return; 
+    setIsDescriptionLoading(true);
+    try {
+        const desc = await getExerciseDescription(currentExercise.name);
+        setDescription(desc);
+    } catch (error) {
+        setDescription("Failed to load description.");
+    } finally {
+        setIsDescriptionLoading(false);
+    }
   };
 
-  /** Saves the user's effort feedback and automatically moves to the next exercise. */
+  const handleFetchAlternatives = async () => {
+    if (isAlternativesModalOpen) {
+        setIsAlternativesModalOpen(false);
+        return;
+    }
+    setIsAlternativesModalOpen(true);
+    if (alternatives.length > 0 || !isOnline) return;
+    if (!preferences?.equipment) return;
+    setIsLoadingAlternatives(true);
+    try {
+        const currentDayExerciseNames = activeDayWorkout.exercises.map(ex => ex.name);
+        const alts = await getAlternativeExercises(currentExercise, preferences.equipment, currentDayExerciseNames);
+        setAlternatives(alts);
+    } finally {
+        setIsLoadingAlternatives(false);
+    }
+  };
+
+  const handleSelectAlternative = (newExercise: Exercise) => {
+    const originalExerciseName = currentExercise.name;
+    onExerciseSwap(activeDayWorkout.day, originalExerciseName, newExercise);
+    setActiveDayWorkout(currentWorkout => {
+        const newExercises = [...currentWorkout.exercises];
+        newExercises[exerciseIndex] = newExercise;
+        return { ...currentWorkout, exercises: newExercises };
+    });
+    setSessionData(prev => {
+        if (!prev) return null;
+        const updated = [...prev];
+        updated[exerciseIndex] = {
+            exerciseName: newExercise.name,
+            sets: Array.from({ length: parseInt(newExercise.sets, 10) }, () => ({ reps: '', weight: '' })),
+            effort: undefined,
+        };
+        return updated;
+    });
+    setIsAlternativesModalOpen(false);
+  };
+
+  const useLastWeight = (setIndex: number) => {
+    const weightToUse = lastWeight[currentExercise.name] || lastPerformedSet?.weight || '';
+    if (weightToUse) {
+        handleSetChange(setIndex, 'weight', String(weightToUse));
+    }
+  };
+  
+  const handleNextExercise = () => {
+    stopTimer();
+    clearWarningFlash();
+    setIsResting(false);
+
+    const setsPerformedForCurrentExercise = sessionData[exerciseIndex]?.sets.some(s => s.reps && String(s.reps).trim() !== '');
+    const restDuration = currentExercise.restAfterExercise;
+    const isLastExercise = exerciseIndex >= activeDayWorkout.exercises.length - 1;
+
+    // Only start the between-exercise rest timer if at least one set was performed.
+    if (setsPerformedForCurrentExercise && restDuration && restDuration > 0 && !isLastExercise) {
+        setIsRestingBetweenExercises(true);
+        startTimer(restDuration);
+    } else {
+        moveToNextExerciseLogic();
+    }
+  };
+
   const handleEffortSelect = (effort: 'Easy' | 'Good' | 'Hard') => {
      setSessionData(prev => {
         if (!prev) return null;
@@ -279,26 +356,56 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
         updated[exerciseIndex].effort = effort;
         return updated;
      });
-     // Use a short delay to provide visual feedback before moving on.
      setTimeout(handleNextExercise, 300);
   }
 
   // --- RENDER LOGIC ---
 
-  const isWeightApplicable = currentExercise.suggestedWeight !== 'Bodyweight' && !CARDIO_KEYWORDS.some(keyword => currentExercise.name.toLowerCase().includes(keyword.toLowerCase()));
+  const isTimedExercise = parseDuration(currentExercise.reps) !== null;
+  const isWeightApplicable = currentExercise.suggestedWeight !== 'Bodyweight' && !isTimedExercise && !CARDIO_KEYWORDS.some(keyword => currentExercise.name.toLowerCase().includes(keyword.toLowerCase()));
   const isCardio = CARDIO_KEYWORDS.some(keyword => currentExercise.name.toLowerCase().includes(keyword.toLowerCase()));
 
-  // Render the full-screen rest timer overlay.
+  if (isExerciseTimerRunning) {
+    const totalSets = parseInt(currentExercise.sets, 10);
+    const currentSetNumber = (timedSetIndex ?? -1) + 1;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-95 flex flex-col justify-center items-center text-center p-6 animate-fade-in z-50">
+            <h2 className="text-3xl font-bold text-slate-300 mb-4">{currentExercise.name}</h2>
+            <p className="text-8xl font-mono font-extrabold text-indigo-400 mb-8">{formatTime(exerciseTime)}</p>
+            <button onClick={handleStopExerciseTimer} className={`${button.secondary} !py-3 !px-8 !text-lg`}>
+                Stop & Log Time
+            </button>
+            <p className={`${typography.pMuted} mt-12`}>Set {currentSetNumber} of {totalSets}</p>
+        </div>
+    );
+  }
+
+  if (isRestingBetweenExercises) {
+    const nextExercise = activeDayWorkout.exercises[exerciseIndex + 1];
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-95 flex flex-col justify-center items-center text-center p-6 animate-fade-in z-50">
+            <h2 className="text-3xl font-bold text-slate-300 mb-4">Resting</h2>
+            <p className="text-8xl font-mono font-extrabold text-indigo-400 mb-8">{formatTime(time)}</p>
+            <button onClick={() => { stopTimer(); clearWarningFlash(); moveToNextExerciseLogic(); }} className={button.secondary}>
+                Skip Rest
+            </button>
+            {nextExercise && (
+              <p className={`${typography.pMuted} mt-12`}>Next Exercise: <span className="font-bold text-slate-300">{nextExercise.name}</span></p>
+            )}
+        </div>
+    );
+  }
+
   if (isResting) {
     const totalSets = parseInt(currentExercise.sets, 10);
-    const nextSetNumber = (lastCompletedSetIndex ?? -1) + 2; // 0-indexed + 1 for next, +1 for 1-based display
+    const nextSetNumber = (lastCompletedSetIndex ?? -1) + 2;
     const nextUpText = `Set ${nextSetNumber} of ${totalSets}`;
     
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-90 flex flex-col justify-center items-center text-center p-6 animate-fade-in z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-95 flex flex-col justify-center items-center text-center p-6 animate-fade-in z-50">
             <h2 className="text-3xl font-bold text-slate-300 mb-4">Rest</h2>
             <p className="text-8xl font-mono font-extrabold text-indigo-400 mb-8">{formatTime(time)}</p>
-            <button onClick={() => { stopTimer(); handleRestComplete(); }} className={button.secondary}>
+            <button onClick={() => { stopTimer(); clearWarningFlash(); setIsResting(false); }} className={button.secondary}>
                 Skip Rest
             </button>
             <p className={`${typography.pMuted} mt-12`}>Next up: {nextUpText}</p>
@@ -306,7 +413,6 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     )
   }
 
-  // Render the main active workout screen.
   return (
     <div className={layout.container}>
         <div className="flex justify-between items-start mb-2 gap-4">
@@ -373,49 +479,69 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
         )}
         
         <div className={card.base}>
-            <div className={`grid ${isWeightApplicable ? 'grid-cols-5' : 'grid-cols-4'} gap-4 items-center font-semibold text-slate-500 dark:text-slate-400 mb-4 px-4`}>
+            <div className={`grid ${isWeightApplicable ? 'grid-cols-5' : (isTimedExercise ? 'grid-cols-3' : 'grid-cols-4')} gap-4 items-center font-semibold text-slate-500 dark:text-slate-400 mb-4 px-4`}>
                 <span>Set</span>
                 <span>Target</span>
                 {isWeightApplicable && <span>Weight (lbs)</span>}
-                <span>{isCardio ? 'Time' : 'Reps'}</span>
-                <span></span>
+                {isTimedExercise ? <span className="text-center">Action</span> : <span>{isCardio ? 'Time' : 'Reps'}</span>}
+                {!isTimedExercise && <span></span>}
             </div>
             <div className="space-y-3">
-                {Array.from({ length: parseInt(currentExercise.sets, 10) }).map((_, i) => (
-                    <div key={i} className={`grid ${isWeightApplicable ? 'grid-cols-5' : 'grid-cols-4'} gap-4 items-center bg-slate-100 dark:bg-slate-800 p-4 rounded-lg`}>
-                        <span className="font-bold text-lg text-slate-900 dark:text-white">{i + 1}</span>
-                        <div>
-                          <p className="text-slate-700 dark:text-slate-300">{currentExercise.reps} {isCardio ? '' : 'reps'}</p>
-                          {currentExercise.suggestedWeight && currentExercise.suggestedWeight !== 'Bodyweight' && (
-                            <p className="text-xs text-indigo-500 dark:text-indigo-400 font-semibold mt-1">Suggests: {currentExercise.suggestedWeight}</p>
-                          )}
-                        </div>
-                        {isWeightApplicable && (
-                            <div className="relative">
-                                <input
-                                    type="tel"
-                                    placeholder={`Last: ${lastPerformedSet?.weight || 'N/A'}`}
-                                    value={sessionData[exerciseIndex]?.sets[i]?.weight || ''}
-                                    onChange={(e) => handleSetChange(i, 'weight', e.target.value)}
-                                    className={form.textInput}
-                                />
-                                {i > 0 && <button onClick={() => useLastWeight(i)} className={`absolute -bottom-5 right-0 text-xs ${button.link}`}>Use last</button>}
+                {Array.from({ length: parseInt(currentExercise.sets, 10) }).map((_, i) => {
+                    const isSetCompleted = !!sessionData[exerciseIndex]?.sets[i]?.reps;
+                    
+                    return (
+                        <div key={i} className={`grid ${isWeightApplicable ? 'grid-cols-5' : (isTimedExercise ? 'grid-cols-3' : 'grid-cols-4')} gap-4 items-center bg-slate-100 dark:bg-slate-800 p-4 rounded-lg`}>
+                            <span className="font-bold text-lg text-slate-900 dark:text-white">{i + 1}</span>
+                            <div>
+                              <p className="text-slate-700 dark:text-slate-300">{currentExercise.reps}</p>
+                              {currentExercise.suggestedWeight && currentExercise.suggestedWeight !== 'Bodyweight' && !isTimedExercise && (
+                                <p className="text-xs text-indigo-500 dark:text-indigo-400 font-semibold mt-1">Suggests: {currentExercise.suggestedWeight}</p>
+                              )}
                             </div>
-                        )}
-                        <div>
-                            <input
-                                type="tel"
-                                placeholder={currentExercise.reps.split('-')[0]}
-                                value={sessionData[exerciseIndex]?.sets[i]?.reps || ''}
-                                onChange={(e) => handleSetChange(i, 'reps', e.target.value)}
-                                className={form.textInput}
-                            />
+                            
+                            {isTimedExercise ? (
+                                <div className="flex items-center justify-center">
+                                    {isSetCompleted ? (
+                                        <div className="flex items-center gap-2 font-bold text-teal-500 dark:text-teal-400">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                            <span>Completed</span>
+                                        </div>
+                                    ) : (
+                                        <button onClick={() => handleStartExerciseTimer(i)} className={button.primarySmall}>Start</button>
+                                    )}
+                                </div>
+                            ) : (
+                                <>
+                                    {isWeightApplicable && (
+                                        <div className="relative">
+                                            <input
+                                                type="tel"
+                                                placeholder={`Last: ${lastPerformedSet?.weight || 'N/A'}`}
+                                                value={sessionData[exerciseIndex]?.sets[i]?.weight || ''}
+                                                onChange={(e) => handleSetChange(i, 'weight', e.target.value)}
+                                                className={form.textInput}
+                                            />
+                                            {i > 0 && <button onClick={() => useLastWeight(i)} className={`absolute -bottom-5 right-0 text-xs ${button.link}`}>Use last</button>}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <input
+                                            type="tel"
+                                            placeholder={currentExercise.reps.split('-')[0]}
+                                            value={sessionData[exerciseIndex]?.sets[i]?.reps || ''}
+                                            onChange={(e) => handleSetChange(i, 'reps', e.target.value)}
+                                            className={form.textInput}
+                                        />
+                                    </div>
+                                    <button onClick={() => handleSetCompleted(i)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2 rounded-md disabled:bg-slate-500 dark:disabled:bg-slate-600" disabled={!sessionData[exerciseIndex]?.sets[i]?.reps}>
+                                        ✓
+                                    </button>
+                                </>
+                            )}
                         </div>
-                        <button onClick={() => handleSetCompleted(i)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2 rounded-md disabled:bg-slate-500 dark:disabled:bg-slate-600" disabled={!sessionData[exerciseIndex]?.sets[i]?.reps}>
-                            ✓
-                        </button>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
 
@@ -431,7 +557,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
         )}
 
         <div className="mt-8 flex justify-between items-center">
-            <button onClick={handleFinishWorkout} className={button.dangerLarge}>
+            <button onClick={() => handleFinishWorkout()} className={button.dangerLarge}>
                 End Workout
             </button>
             <button onClick={handleNextExercise} disabled={!allSetsCompleted} className={button.primary.replace('w-full', '')}>

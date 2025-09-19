@@ -109,10 +109,11 @@ export const ViewWorkoutModal: React.FC<ViewWorkoutModalProps> = ({ workout, onC
           <button onClick={onClose} className={modal.closeButton} aria-label="Close workout details">&times;</button>
         </div>
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-            {workout.exercises.map(ex => {
+            {workout.exercises.map((ex, index) => {
                 const upgradeInfo = upgradedExercises.get(ex.name);
                 const hasUpgrade = !!upgradeInfo;
                 const choiceMade = choicesMade.has(ex.name);
+                const isLastExercise = index === workout.exercises.length - 1;
 
                 return (
                     <div key={ex.name} className={`p-4 rounded-lg border ${hasUpgrade && !choiceMade ? 'bg-sky-100/50 dark:bg-sky-900/40 border-sky-400 dark:border-sky-700' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
@@ -121,7 +122,10 @@ export const ViewWorkoutModal: React.FC<ViewWorkoutModalProps> = ({ workout, onC
                         {ex.suggestedWeight && ex.suggestedWeight !== 'Bodyweight' && (
                             <p className={`${typography.pMuted} text-xs mt-1`}>Suggests: {ex.suggestedWeight}</p>
                         )}
-                        <p className={`${typography.pMuted} text-xs mt-1 opacity-75`}>Rest: {ex.rest} seconds</p>
+                        <p className={`${typography.pMuted} text-xs mt-1 opacity-75`}>Rest between sets: {ex.rest} seconds</p>
+                        {!isLastExercise && ex.restAfterExercise && ex.restAfterExercise > 0 && (
+                             <p className={`${typography.pMuted} text-xs mt-1 opacity-75`}>Rest after exercise: {ex.restAfterExercise} seconds</p>
+                        )}
 
                         {hasUpgrade && !choiceMade && (
                             <div className="mt-3 pt-3 border-t border-sky-200 dark:border-sky-800">

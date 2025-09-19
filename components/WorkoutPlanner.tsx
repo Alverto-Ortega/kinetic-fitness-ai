@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { generateWorkoutPlan } from '../services/geminiService.ts';
-import { WorkoutPlan, Preferences } from '../types.ts';
+import { WorkoutPlan, Preferences, BodyAnalysis } from '../types.ts';
 import { AIFeatures } from './AIFeatures.tsx';
 import { typography, form, button, card, notice, layout, spinner, cn } from '../styles/theme.ts';
 
@@ -8,7 +8,16 @@ interface WorkoutPlannerProps {
   /** Callback function when a new plan is successfully generated. */
   onPlanGenerated: (plan: WorkoutPlan, preferences: Preferences) => void;
   /** Callback function to handle importing user data from a file. */
-  onImportData: (data: { plan: WorkoutPlan; workoutHistory: any[]; streak: any }) => void;
+  onImportData: (data: {
+    plan: WorkoutPlan;
+    workoutHistory: any[];
+    streak: any;
+    preferences?: Partial<Preferences>;
+    completedDays?: string[];
+    analysisHistory?: BodyAnalysis[];
+    hasCompletedFirstPhase?: boolean;
+    lastSummary?: string;
+  }) => void;
   /** The user's workout history, used to inform the AI for new plans. */
   history: any[];
   /** A boolean indicating if the user is currently online. */
@@ -137,33 +146,56 @@ export const WorkoutPlanner: React.FC<WorkoutPlannerProps> = ({ onPlanGenerated,
   };
   
   /**
-   * Opens a file dialog to allow the user to import a previously exported JSON file.
+   * Opens a file dialog to import a JSON file using the memory-efficient Streaming API.
+   * This is the only supported method to prevent errors with large files.
    */
   const handleImportClick = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                try {
-                    const data = JSON.parse(event.target?.result as string);
-                    if (data.plan && data.workoutHistory) {
-                        onImportData(data);
-                    } else {
-                        setError('Invalid import file format.');
-                    }
-                } catch (err) {
-                    setError('Failed to read or parse the import file.');
-                }
-            };
-            reader.readAsText(file);
+        if (!file) {
+            return;
+        }
+        setError('');
+
+        // The streaming API is now the only supported method for reliability with large files.
+        if (!file.stream || !window.TextDecoderStream) {
+            setError('Your browser does not support the required File Streaming API. Please use a recent version of Chrome, Firefox, or Safari to import large files.');
+            return;
+        }
+        
+        // Use memory-efficient streaming approach.
+        try {
+            const fileStream = file.stream();
+            const decoder = new TextDecoderStream();
+            const readableStream = fileStream.pipeThrough(decoder);
+            
+            let jsonData = '';
+            const reader = readableStream.getReader();
+
+            // Read the stream chunk by chunk.
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                jsonData += value;
+            }
+
+            const data = JSON.parse(jsonData);
+            if (data.plan && data.workoutHistory) {
+                onImportData(data);
+            } else {
+                setError('Invalid import file format. The file is missing required data.');
+            }
+        } catch (err) {
+            console.error("Error importing data via stream:", err);
+            setError('Failed to import data. The file may be corrupted, invalid, or too large for your device to process.');
         }
     };
     input.click();
   };
+
 
   /**
    * Handles the form submission, calls the AI service to generate a plan,

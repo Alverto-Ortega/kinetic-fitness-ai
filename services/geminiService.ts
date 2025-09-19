@@ -19,8 +19,9 @@ const exerciseSchema = {
         reps: { type: Type.STRING, description: "Target repetition range, as a string (e.g., '8-12', '5'). For Yoga, this should describe the hold duration (e.g., 'Hold for 5 breaths')." },
         rest: { type: Type.INTEGER, description: "Rest time in seconds between sets. For a superset, this should be 0." },
         suggestedWeight: { type: Type.STRING, description: "CRITICAL: The suggested starting weight. This value MUST be one of two formats ONLY: 1. A specific weight in lbs (e.g., '135 lbs'). 2. The single, exact string 'Bodyweight'. You are FORBIDDEN from combining these (e.g., 'Bodyweight + 25 lbs'). For exercises like Barbell Squats or Dumbbell Curls, provide only the weight value. For exercises like Weighted Pull-ups, provide only the *additional* weight to be used (e.g., '25 lbs')." },
+        restAfterExercise: { type: Type.INTEGER, description: "Rest time in seconds AFTER completing all sets of this exercise, before starting the next one. This MUST be based on the workout goal. E.g., longer (120-180s) for Strength, shorter (30-60s) for HIIT/Endurance. The last exercise of the day MUST have a value of 0." },
     },
-    required: ["name", "sets", "reps", "rest", "suggestedWeight"],
+    required: ["name", "sets", "reps", "rest", "suggestedWeight", "restAfterExercise"],
 };
 
 /**
@@ -152,6 +153,11 @@ const buildPrompt = (preferences: any, history?: any[]) => {
     2.  **Creative & Advanced Exercise Selection:** Make full and varied use of ALL the user's available equipment. Avoid repetitive, generic plans. Introduce different exercises and variations that target the same muscle groups. For 'Intermediate' and 'Advanced' users, be more experimental: suggest advanced exercise variations and occasionally introduce techniques like supersets, drop sets, or pause reps. For a superset, format the exercise name as 'Superset: [Exercise 1] / [Exercise 2]', list it as one exercise item, and set its rest time to 0.
     3.  **Balanced Structure:** The overall weekly plan must be balanced, targeting all major muscle groups. Structure individual workouts logically, often starting with major compound lifts and moving to accessory/isolation work.
     4.  **Yoga Goal:** If a day's goal is 'Yoga', create a sequence of yoga poses. For each pose, structure the exercise object as follows: 'sets' should be '1', 'reps' should describe the hold duration (e.g., 'Hold for 5 breaths', '30-60 second hold'), 'rest' should be a short transition time (e.g., 10-15 seconds), and 'suggestedWeight' must be 'Bodyweight'. Target body parts should be something like 'Flexibility, Balance'.
+    5.  **Inter-Exercise Rest:** You MUST set the 'restAfterExercise' property for each exercise. This is the rest period *before the next exercise begins*. Base this on the day's goal:
+        -   **Strength/Hypertrophy:** Use longer rests (120-180 seconds) to allow for near-full recovery between compound movements.
+        -   **Endurance/Fat Loss (HIIT):** Use shorter rests (30-90 seconds) to maintain an elevated heart rate and metabolic stress.
+        -   **Yoga:** Use minimal rests (10-30 seconds) to facilitate smooth transitions between poses.
+        -   **CRITICAL RULE:** The very last exercise of the day's workout MUST have a 'restAfterExercise' value of exactly 0.
   `;
 
   // Add workout history to the prompt for progressive overload.
@@ -350,7 +356,7 @@ export const getAlternativeExercises = async (exercise: Exercise, availableEquip
 
     Critical Rule: The generated alternative exercises MUST NOT be any of the following, as they are already in the user's plan for today: ${currentDayExercises.join(', ')}.
 
-    For each alternative, provide the name, sets, reps, rest, and a suggestedWeight. The sets, reps, and rest should be similar to the original exercise. The alternatives must be different from the original exercise.
+    For each alternative, provide the name, sets, reps, rest, suggestedWeight, and an appropriate 'restAfterExercise'. The sets, reps, and rest should be similar to the original exercise. The alternatives must be different from the original exercise.
   `;
 
     try {
@@ -388,6 +394,7 @@ export const getAlternativeProgression = async (exercise: Exercise, lastWeight: 
         - Reps: ${exercise.reps}
         - Rest: ${exercise.rest}
         - Current Weight: ${lastWeight}
+        - Rest After Exercise: ${exercise.restAfterExercise}
 
         The AI previously suggested increasing the weight to ${exercise.suggestedWeight}. Instead, modify one or more of the other parameters to achieve progressive overload.
 
@@ -396,7 +403,7 @@ export const getAlternativeProgression = async (exercise: Exercise, lastWeight: 
         2. Increase the number of repetitions per set (e.g., from '8-12' to '10-15').
         3. Decrease the rest time between sets (e.g., from 90 to 75 seconds).
 
-        Return a single, complete exercise object in JSON format, matching the provided schema. The 'suggestedWeight' field should remain the same as the user's current weight ('${lastWeight}'). Do not change the exercise name. Pick only ONE modification method.
+        Return a single, complete exercise object in JSON format, matching the provided schema. The 'suggestedWeight' field should remain the same as the user's current weight ('${lastWeight}'). Do not change the exercise name. Pick only ONE modification method. Ensure the 'restAfterExercise' value is preserved from the original.
     `;
 
     try {
@@ -499,7 +506,7 @@ export const analyzeBodyComposition = async (imageDataBase64: string, mimeType: 
 
 /**
  * Generates a brief, insightful summary of the user's recent workout performance.
- * @param history The user's recent workout history.
+ * @param history The user's entire workout history.
  * @param plan The user's current workout plan for context.
  * @returns A promise that resolves to a summary string.
  */
@@ -508,43 +515,40 @@ export const getWorkoutSummary = async (history: WorkoutSession[], plan: Workout
         return "Complete a workout to get your first AI insight!";
     }
     const lastSession = history[history.length - 1];
-    // Find the planned workout corresponding to the completed session.
     const plannedWorkout = plan?.find(p => p.day === lastSession.day);
 
     let prompt = `
-        You are Kinetix, a hyper-observant and honest AI fitness coach. Analyze the user's most recent workout session ('completedSession') and compare it to what was originally scheduled ('plannedWorkout'). Provide a specific, insightful, and truthful 1-2 sentence summary. Do not use markdown.
+        You are Kinetix, a data-driven and motivational AI fitness coach. Your task is to analyze the user's most recent workout session and provide a specific, insightful, and encouraging 1-2 sentence summary. Do not use markdown.
 
-        Your analysis MUST follow these logic steps:
-        1.  **Check for Swaps:** Compare the exercise names in 'completedSession' to 'plannedWorkout'. Did the user perform an exercise that wasn't on the original plan? This indicates they swapped an exercise.
-        2.  **Check for Incompleteness:** Is the number of exercises in 'completedSession' less than in 'plannedWorkout'?
-        3.  **Synthesize the Summary (Prioritize your response):**
-            *   **If a swap occurred:** Start your summary by acknowledging the swap in a positive way. Then, find a specific achievement from one of the completed exercises (it could be the swapped one or another).
-            *   **If no swap, but incomplete:** Start your summary by acknowledging the shorter session in a supportive tone. Then, find a specific achievement from an exercise that WAS completed.
-            *   **If the workout was completed as planned:** Go straight to finding a specific, positive data point or achievement. Mention an exercise by name. Focus on things like increased weight, more reps, or a 'Hard' effort rating indicating they pushed themselves.
+        **CRITICAL ANALYSIS INSTRUCTIONS:**
+        1.  **Identify the Single Best Achievement:** Scrutinize the 'completedSession' data. Your primary goal is to find the most impressive accomplishment. Look for one of these, in order of importance:
+            a. **Personal Record (PR):** Compare an exercise in 'completedSession' against the user's ENTIRE 'workoutHistory'. Did they lift more weight for the same or more reps? Or more reps with the same weight? If so, this is a PR.
+            b. **Volume Increase:** For a major compound lift, calculate the total volume (sets x reps x weight) and see if it's a significant increase from the last time they performed it.
+            c. **Pushing Through a Challenge:** Did the user rate a heavy, difficult exercise as 'Hard'? This shows they are working at their limit, which is key for progress.
+            d. **Great Consistency:** Did the user perfectly hit or exceed their target reps on all sets of an exercise?
 
-        **Example for Swapped Workout:** "Nice, I see you swapped in Dumbbell Flyes and hit a new rep PR on them!"
-        **Example for Incomplete Workout:** "Looks like you had to cut the session short, but you still showed great strength on the Bench Press you completed!"
-        **Example for Complete Workout:** "Great session! I noticed you pushed hard on the Bench Press and managed to add 5 lbs. That's excellent progress."
+        2.  **Craft the Summary:**
+            *   **Sentence 1:** State the specific achievement you found. MENTION THE EXERCISE BY NAME AND USE THE ACTUAL NUMBERS (weight, reps). Be enthusiastic.
+            *   **Sentence 2:** Connect this achievement to their future progress. Give a short, encouraging follow-up.
+        
+        **RESPONSE EXAMPLES:**
+        *   (PR Example): "Incredible push on the Barbell Squats! Hitting 225 lbs for 5 reps is a new personal record. That strength is really starting to show."
+        *   (Effort Example): "That was a tough session, and you rated the Deadlifts as 'Hard'. Pushing yourself like that is exactly what builds long-term strength."
+        *   (Consistency Example): "Excellent consistency on the Dumbbell Press today, hitting all your target reps across every set. That's how you build a rock-solid foundation."
+        *   (Swap/Incomplete Fallback): "Nice work swapping in Dumbbell Rows! I see you managed to pull a solid 50 lbs for 10 reps on them."
 
         ---
-        **Data for Analysis:**
+        **DATA FOR ANALYSIS:**
 
-        **1. The Completed Session:**
+        **1. The Completed Session (Most Recent):**
         ${JSON.stringify(lastSession, null, 2)}
+        
+        **2. The Originally Planned Workout for that Day:**
+        ${plannedWorkout ? JSON.stringify(plannedWorkout, null, 2) : '(Plan data not available, base your analysis only on the completed session\'s data.)'}
+
+        **3. The User's Entire Workout History (for PR comparison):**
+        ${JSON.stringify(history, null, 2)}
     `;
-
-    if (plannedWorkout) {
-        prompt += `
-        **2. The Originally Planned Workout for that Day:**
-        ${JSON.stringify(plannedWorkout, null, 2)}
-        `;
-    } else {
-        prompt += `
-        **2. The Originally Planned Workout for that Day:**
-        (Plan data not available, base your analysis only on the completed session's data.)
-        `
-    }
-
 
     try {
         const response = await ai.models.generateContent({

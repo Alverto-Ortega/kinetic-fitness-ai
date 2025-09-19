@@ -19,6 +19,40 @@
       *, *:before, *:after { box-sizing: inherit; }
       body, h1, h2, h3, p, ol, ul { margin: 0; padding: 0; font-weight: normal; }
       body { font-family: sans-serif; }
+
+      /* Timer Completion Flash Effect */
+      @keyframes timer-completion-light {
+        0%, 100% { background-color: #f8fafc; } /* slate-50 */
+        50% { background-color: #c7d2fe; } /* indigo-200 */
+      }
+      @keyframes timer-completion-dark {
+        0%, 100% { background-color: #000000; } /* black */
+        50% { background-color: #312e81; } /* indigo-800 */
+      }
+      
+      html.light .timer-completion-flash {
+        animation: timer-completion-light 500ms 4 ease-in-out;
+      }
+      html.dark .timer-completion-flash {
+        animation: timer-completion-dark 500ms 4 ease-in-out;
+      }
+
+      /* Timer Warning Flash Effect (NEW) */
+      @keyframes timer-warning-light {
+        0%, 100% { background-color: #f8fafc; } /* slate-50 */
+        50% { background-color: #eef2ff; } /* indigo-50 */
+      }
+      @keyframes timer-warning-dark {
+        0%, 100% { background-color: #000000; } /* black */
+        50% { background-color: #1e1b4b; } /* indigo-950 */
+      }
+      
+      html.light .timer-warning-flash {
+        animation: timer-warning-light 1000ms infinite ease-in-out;
+      }
+      html.dark .timer-warning-flash {
+        animation: timer-warning-dark 1000ms infinite ease-in-out;
+      }
     </style>
 
     <script src="https://cdn.tailwindcss.com"></script>

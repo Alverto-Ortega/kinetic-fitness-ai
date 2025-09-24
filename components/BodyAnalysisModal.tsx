@@ -98,44 +98,46 @@ export const BodyAnalysisModal: React.FC<BodyAnalysisModalProps> = ({ isOpen, on
 
     return (
         <div className={modal.backdrop} onClick={onClose}>
-            <div className={modal.containerLarge} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="analysis-modal-title">
-                <div className="flex justify-between items-start mb-4">
+            <div className={`${modal.containerLarge.replace('p-6', '')} flex flex-col max-h-[90vh]`} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="analysis-modal-title">
+                <div className="flex justify-between items-start p-6 pb-4 flex-shrink-0">
                     <h2 id="analysis-modal-title" className={typography.h2.replace('sm:text-3xl', '')}>AI Body Composition Analysis</h2>
                     <button onClick={onClose} className={modal.closeButton} aria-label="Close analysis modal">&times;</button>
                 </div>
 
-                <p className={`${notice.warning} mb-4 !text-sm`}>
-                    <strong>Disclaimer:</strong> This is an experimental AI feature for informational purposes only and is not medical advice. For best results, use a clear, full-body photo in a well-lit environment.
-                </p>
+                <div className="flex-grow overflow-y-auto px-6 pb-6">
+                    <p className={`${notice.warning} mb-4 !text-sm`}>
+                        <strong>Disclaimer:</strong> This is an experimental AI feature for informational purposes only and is not medical advice. For best results, use a clear, full-body photo in a well-lit environment.
+                    </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                        <button onClick={() => fileInputRef.current?.click()} className={`${button.secondary} w-full !py-3 mb-4`}>
-                            {selectedFile ? 'Change Image' : 'Select Image'}
-                        </button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                            <button onClick={() => fileInputRef.current?.click()} className={`${button.secondary} w-full !py-3 mb-4`}>
+                                {selectedFile ? 'Change Image' : 'Select Image'}
+                            </button>
 
-                        <div className="w-full h-80 bg-slate-800 rounded-lg flex items-center justify-center p-2">
-                            {previewUrl ? (
-                                <img
-                                    src={previewUrl}
-                                    alt="Preview"
-                                    className="max-w-full max-h-full object-contain"
-                                />
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center text-slate-500 text-center border-2 border-dashed border-slate-700 rounded-lg p-4">
-                                    Select an image to see a preview.
-                                </div>
-                            )}
+                            <div className="w-full h-80 bg-slate-800 rounded-lg flex items-center justify-center p-2">
+                                {previewUrl ? (
+                                    <img
+                                        src={previewUrl}
+                                        alt="Preview"
+                                        className="max-w-full max-h-full object-contain"
+                                    />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-center border-2 border-dashed border-slate-700 rounded-lg p-4">
+                                        Select an image to see a preview.
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                    <div>
-                        <button onClick={handleSubmit} disabled={!selectedFile || isLoading} className={`${button.primary.replace('text-lg', '')} bg-sky-600 hover:bg-sky-700`}>
-                            {isLoading ? 'Analyzing...' : 'Analyze Image'}
-                        </button>
+                        <div>
+                            <button onClick={handleSubmit} disabled={!selectedFile || isLoading} className={`${button.primary.replace('text-lg', '')} bg-sky-600 hover:bg-sky-700`}>
+                                {isLoading ? 'Analyzing...' : 'Analyze Image'}
+                            </button>
 
-                        {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+                            {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
 
+                        </div>
                     </div>
                 </div>
             </div>

@@ -1,6 +1,6 @@
 // Kinetix AI Service: Manages all interactions with the Google Gemini API.
 import { GoogleGenAI, Type } from "@google/genai";
-import { WorkoutPlan, WorkoutSession, Exercise, DayWorkout, WarmUpExercise } from "../types";
+import { WorkoutPlan, WorkoutSession, Exercise, DayWorkout, WarmUpExercise, PerformedExercise } from "../types";
 
 // Initialize the GoogleGenAI client, assuming API_KEY is in environment variables.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
@@ -517,12 +517,35 @@ export const getWorkoutSummary = async (history: WorkoutSession[], plan: Workout
     const lastSession = history[history.length - 1];
     const plannedWorkout = plan?.find(p => p.day === lastSession.day);
 
+    // --- NEW LOGIC: Create a concise, relevant history for PR comparison ---
+    // This prevents sending an excessively large history object in the prompt,
+    // which could cause API errors due to token limits.
+    const relevantHistory: { [exerciseName: string]: PerformedExercise } = {};
+    const exercisesInLastSession = lastSession.exercises.map(e => e.exerciseName);
+
+    // Iterate through the history in reverse (from second-to-last session)
+    // to find the most recent prior performance for each exercise.
+    for (let i = history.length - 2; i >= 0; i--) {
+        const session = history[i];
+        for (const performedExercise of session.exercises) {
+            // If this exercise was in the last session and we haven't found a prior record for it yet...
+            if (exercisesInLastSession.includes(performedExercise.exerciseName) && !relevantHistory[performedExercise.exerciseName]) {
+                relevantHistory[performedExercise.exerciseName] = performedExercise;
+            }
+        }
+        // Optimization: if we've found a record for every exercise, we can stop searching.
+        if (Object.keys(relevantHistory).length === exercisesInLastSession.length) {
+            break;
+        }
+    }
+    // --- END NEW LOGIC ---
+
     let prompt = `
         You are Kinetix, a data-driven and motivational AI fitness coach. Your task is to analyze the user's most recent workout session and provide a specific, insightful, and encouraging 1-2 sentence summary. Do not use markdown.
 
         **CRITICAL ANALYSIS INSTRUCTIONS:**
         1.  **Identify the Single Best Achievement:** Scrutinize the 'completedSession' data. Your primary goal is to find the most impressive accomplishment. Look for one of these, in order of importance:
-            a. **Personal Record (PR):** Compare an exercise in 'completedSession' against the user's ENTIRE 'workoutHistory'. Did they lift more weight for the same or more reps? Or more reps with the same weight? If so, this is a PR.
+            a. **Personal Record (PR):** Compare an exercise in 'completedSession' against its corresponding entry in the 'relevantWorkoutHistory'. The 'relevantWorkoutHistory' provides the single most recent performance for that specific exercise. Did they lift more weight for the same or more reps? Or more reps with the same weight? If so, this is a PR.
             b. **Volume Increase:** For a major compound lift, calculate the total volume (sets x reps x weight) and see if it's a significant increase from the last time they performed it.
             c. **Pushing Through a Challenge:** Did the user rate a heavy, difficult exercise as 'Hard'? This shows they are working at their limit, which is key for progress.
             d. **Great Consistency:** Did the user perfectly hit or exceed their target reps on all sets of an exercise?
@@ -546,8 +569,8 @@ export const getWorkoutSummary = async (history: WorkoutSession[], plan: Workout
         **2. The Originally Planned Workout for that Day:**
         ${plannedWorkout ? JSON.stringify(plannedWorkout, null, 2) : '(Plan data not available, base your analysis only on the completed session\'s data.)'}
 
-        **3. The User's Entire Workout History (for PR comparison):**
-        ${JSON.stringify(history, null, 2)}
+        **3. The User's Relevant Workout History (for PR comparison):**
+        ${JSON.stringify(relevantHistory, null, 2)}
     `;
 
     try {

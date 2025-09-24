@@ -139,18 +139,46 @@ function useInterval(callback: () => void, delay: number | null) {
 
 /**
  * A robust timer hook that remains accurate even if the browser tab is backgrounded.
- * It uses timestamps (Date.now()) for calculation instead of relying solely on setInterval.
+ * It uses timestamps (Date.now()) for calculation and can persist its state to localStorage.
  * @param initialTime The initial time for the timer in seconds.
  * @param onComplete Optional callback to execute when the timer finishes.
  * @param onWarning Optional callback to execute when the timer is nearing completion (<= 5 seconds).
+ * @param storageKey Optional key to save the timer's end time in localStorage for persistence.
  * @returns An object with timer state and control functions.
  */
-export const useTimer = (initialTime: number, onComplete?: () => void, onWarning?: () => void) => {
+export const useTimer = (initialTime: number, onComplete?: () => void, onWarning?: () => void, storageKey?: string) => {
   const [time, setTime] = useState(initialTime);
   const [isActive, setIsActive] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const endTimeRef = useRef<number | null>(null);
   const warningTriggeredRef = useRef(false);
+  
+  // Effect to resume a persisted timer on component mount.
+  useEffect(() => {
+    if (storageKey) {
+        const storedEndTime = window.localStorage.getItem(storageKey);
+        if (storedEndTime) {
+            const endTimeNum = parseInt(storedEndTime, 10);
+            if (!isNaN(endTimeNum)) {
+                const remaining = Math.round((endTimeNum - Date.now()) / 1000);
+                if (remaining > 0) {
+                    // Resume the timer from its persisted state.
+                    setTime(remaining);
+                    endTimeRef.current = endTimeNum;
+                    setIsActive(true);
+                    // Trigger warning immediately if it's already in the warning period.
+                    if (onWarning && remaining <= 5 && !warningTriggeredRef.current) {
+                        onWarning();
+                        warningTriggeredRef.current = true;
+                    }
+                } else {
+                    // Clean up an expired timer from storage.
+                    window.localStorage.removeItem(storageKey);
+                }
+            }
+        }
+    }
+  }, [storageKey, onWarning]); // Dependency array ensures this runs if props change.
 
   // Effect to generate the beep sound once on mount.
   useEffect(() => {
@@ -195,6 +223,7 @@ export const useTimer = (initialTime: number, onComplete?: () => void, onWarning
       setTime(0);
       setIsActive(false);
       endTimeRef.current = null;
+      if (storageKey) window.localStorage.removeItem(storageKey); // Clean up on completion
       warningTriggeredRef.current = false; // Reset for next run.
       // Play a sound when the timer finishes.
       audioRef.current?.play().catch(e => console.error("Audio play failed:", e));
@@ -205,23 +234,33 @@ export const useTimer = (initialTime: number, onComplete?: () => void, onWarning
   const startTimer = useCallback((newTime: number) => {
     setTime(newTime);
     // Set a specific timestamp for when the timer should end.
-    endTimeRef.current = Date.now() + newTime * 1000;
+    const newEndTime = Date.now() + newTime * 1000;
+    endTimeRef.current = newEndTime;
     setIsActive(true);
+    if (storageKey) {
+        window.localStorage.setItem(storageKey, String(newEndTime));
+    }
     warningTriggeredRef.current = false;
-  }, []);
+  }, [storageKey]);
   
   const stopTimer = useCallback(() => {
     setIsActive(false);
     endTimeRef.current = null;
+    if (storageKey) {
+        window.localStorage.removeItem(storageKey);
+    }
     warningTriggeredRef.current = false;
-  }, []);
+  }, [storageKey]);
 
   const resetTimer = useCallback((newTime: number) => {
       setIsActive(false);
       endTimeRef.current = null;
+      if (storageKey) {
+        window.localStorage.removeItem(storageKey);
+      }
       setTime(newTime);
       warningTriggeredRef.current = false;
-  }, []);
+  }, [storageKey]);
 
   return { time, isActive, startTimer, stopTimer, resetTimer };
 };

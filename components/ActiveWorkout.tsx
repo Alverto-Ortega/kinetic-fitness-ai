@@ -5,6 +5,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus.ts';
 import { getExerciseDescription, getAlternativeExercises } from '../services/geminiService.ts';
 import { parseDuration } from '../utils/workoutUtils.ts';
 import { AlternativeExercisesModal } from './AlternativeExercisesModal.tsx';
+import { ConfirmationModal } from './ConfirmationModal.tsx';
 import { typography, form, button, card, layout } from '../styles/theme.ts';
 
 interface ActiveWorkoutProps {
@@ -105,6 +106,14 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
   
   // State for the duration-based exercise timer.
   const [timedSetIndex, setTimedSetIndex] = useState<number | null>(null);
+  
+  // State for confirmation modals.
+  const [confirmation, setConfirmation] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   const isOnline = useOnlineStatus();
   const currentExercise = activeDayWorkout.exercises[exerciseIndex];
@@ -157,7 +166,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     }
   }, [isResting, isRestingBetweenExercises, moveToNextExerciseLogic]);
 
-  const { time, startTimer, stopTimer, resetTimer } = useTimer(0, handleTimerComplete, triggerWarningFlash);
+  const { time, startTimer, stopTimer, resetTimer } = useTimer(0, handleTimerComplete, triggerWarningFlash, 'kinetix-rest-timer');
   
   /** Updates the sessionData state when the user types in a rep or weight input field. */
   const handleSetChange = useCallback((setIndex: number, field: 'reps' | 'weight', value: string) => {
@@ -214,7 +223,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     setTimedSetIndex(null);
   }, [timedSetIndex, currentExercise.reps, handleSetChange, handleSetCompleted]);
 
-  const { time: exerciseTime, startTimer: startExerciseTimer, stopTimer: stopExerciseTimer, resetTimer: resetExerciseTimer } = useTimer(0, handleExerciseTimerComplete, triggerWarningFlash);
+  const { time: exerciseTime, startTimer: startExerciseTimer, stopTimer: stopExerciseTimer, resetTimer: resetExerciseTimer } = useTimer(0, handleExerciseTimerComplete, triggerWarningFlash, 'kinetix-exercise-timer');
 
   /** Stops the exercise timer, logs the elapsed time, and completes the set. */
   const handleStopExerciseTimer = useCallback(() => {
@@ -285,11 +294,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     }
   };
 
-  const handleFetchAlternatives = async () => {
-    if (isAlternativesModalOpen) {
-        setIsAlternativesModalOpen(false);
-        return;
-    }
+  const fetchAndShowAlternatives = async () => {
     setIsAlternativesModalOpen(true);
     if (alternatives.length > 0 || !isOnline) return;
     if (!preferences?.equipment) return;
@@ -301,6 +306,15 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     } finally {
         setIsLoadingAlternatives(false);
     }
+  };
+  
+  const handleRequestSwap = () => {
+    setConfirmation({
+        isOpen: true,
+        title: "Swap Exercise?",
+        message: "Are you sure? The AI will suggest some alternatives to replace the current exercise.",
+        onConfirm: fetchAndShowAlternatives,
+    });
   };
 
   const handleSelectAlternative = (newExercise: Exercise) => {
@@ -347,6 +361,15 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
     } else {
         moveToNextExerciseLogic();
     }
+  };
+  
+  const handleRequestSkip = () => {
+    setConfirmation({
+        isOpen: true,
+        title: "Skip Exercise?",
+        message: "Are you sure you want to skip this exercise? Your progress for it won't be saved for this session.",
+        onConfirm: handleNextExercise,
+    });
   };
 
   const handleEffortSelect = (effort: 'Easy' | 'Good' | 'Hard') => {
@@ -450,7 +473,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
             </button>
             {!isCardio && (
               <button
-                  onClick={handleFetchAlternatives}
+                  onClick={handleRequestSwap}
                   className="text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 text-sm font-semibold flex items-center gap-1 disabled:opacity-50"
                   disabled={isLoadingAlternatives || !isOnline}
                   title={!isOnline ? "Connect to internet to swap exercises" : ""}
@@ -458,7 +481,7 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
                   {isLoadingAlternatives ? 'Loading...' : 'Swap Exercise'}
               </button>
             )}
-            <button onClick={handleNextExercise} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-semibold">
+            <button onClick={handleRequestSkip} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-semibold">
                 Skip Exercise &rarr;
             </button>
         </div>
@@ -574,6 +597,19 @@ export const ActiveWorkout: React.FC<ActiveWorkoutProps> = ({
             originalExerciseName={currentExercise.name}
             isOnline={isOnline}
         />
+        
+        {confirmation?.isOpen && (
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(null)}
+                onConfirm={() => {
+                    confirmation.onConfirm();
+                    setConfirmation(null);
+                }}
+                title={confirmation.title}
+                message={confirmation.message}
+            />
+        )}
     </div>
   );
 };

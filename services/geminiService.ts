@@ -2,7 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WorkoutPlan, WorkoutSession, Exercise, DayWorkout, WarmUpExercise, PerformedExercise } from "../types";
 
-// Initialize the GoogleGenAI client, assuming API_KEY is in environment variables.
+// Initialize the GoogleGenAI client, using Vite's environment variable handling.
+// FIX: Changed import.meta.env.VITE_API_KEY to process.env.API_KEY to align with the coding guidelines.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
 // --- JSON Schemas for AI Response Validation ---

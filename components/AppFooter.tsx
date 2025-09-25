@@ -5,12 +5,13 @@ import { ThemeToggle } from './ThemeToggle';
 interface AppFooterProps {
   onShowDocs: () => void;
   onShowFAQ: () => void;
+  onShowSchema: () => void;
   onClearData: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
 }
 
-export const AppFooter: React.FC<AppFooterProps> = ({ onShowDocs, onShowFAQ, onClearData, theme, onToggleTheme }) => {
+export const AppFooter: React.FC<AppFooterProps> = ({ onShowDocs, onShowFAQ, onShowSchema, onClearData, theme, onToggleTheme }) => {
   return (
     <footer className="text-center py-8 text-slate-500 dark:text-slate-500">
       <div className="flex justify-center items-center gap-6 mb-4">
@@ -28,6 +29,14 @@ export const AppFooter: React.FC<AppFooterProps> = ({ onShowDocs, onShowFAQ, onC
           aria-label="View frequently asked questions"
         >
           FAQ
+        </button>
+         <span className="text-slate-300 dark:text-slate-700">|</span>
+        <button 
+          onClick={onShowSchema} 
+          className={typography.link}
+          aria-label="View application data schema"
+        >
+          Data Schema
         </button>
          <span className="text-slate-300 dark:text-slate-700">|</span>
         <button 

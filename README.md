@@ -81,12 +81,11 @@ If you have forked this repository and wish to run it on your local machine, you
 
 3.  **Set Up Your API Key**
     a. Obtain a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-    b. Create a file named `.env` in the root of the project and add your API key. **Important:** For Vite, environment variables must be prefixed with `VITE_`.
+    b. Create a file named `.env` in the root of the project and add your API key.
     ```
     # .env
-    VITE_API_KEY=YOUR_GEMINI_API_KEY_HERE
+    API_KEY=YOUR_GEMINI_API_KEY_HERE
     ```
-    c. You will also need to update `services/geminiService.ts` to use `import.meta.env.VITE_API_KEY` instead of `process.env.API_KEY`.
 
 4.  **Run the Development Server**
     Now, you can start the local server:

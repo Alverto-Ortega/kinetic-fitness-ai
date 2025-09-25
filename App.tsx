@@ -9,6 +9,7 @@ import { useStickyState } from './hooks/useStickyState';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { Documentation } from './components/Documentation';
 import { FAQ } from './components/FAQ';
+import { DataSchemaView } from './components/DataSchemaView';
 import { AppFooter } from './components/AppFooter';
 import { generateWorkoutPlan, checkProgressForScheduleChange, getWorkoutSummary } from './services/geminiService';
 import { AutoGenerationLoader } from './components/AutoGenerationLoader';
@@ -77,6 +78,7 @@ function App() {
 
   const [viewingDocs, setViewingDocs] = useState(false);
   const [viewingFAQ, setViewingFAQ] = useState(false);
+  const [viewingSchema, setViewingSchema] = useState(false);
   const [isAutoGenerating, setIsAutoGenerating] = useState(false);
   const [showScheduleSuggestion, setShowScheduleSuggestion] = useState(false);
   const [showInitialAnalysisPrompt, setShowInitialAnalysisPrompt] = useState(false);
@@ -439,6 +441,10 @@ function App() {
     return <FAQ onClose={() => setViewingFAQ(false)} />;
   }
   
+  if (viewingSchema) {
+    return <DataSchemaView onClose={() => setViewingSchema(false)} />;
+  }
+
   if (isAutoGenerating) {
     return <AutoGenerationLoader />;
   }
@@ -494,6 +500,7 @@ function App() {
       <AppFooter 
         onShowDocs={() => setViewingDocs(true)} 
         onShowFAQ={() => setViewingFAQ(true)}
+        onShowSchema={() => setViewingSchema(true)}
         onClearData={() => setIsClearDataModalOpen(true)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
